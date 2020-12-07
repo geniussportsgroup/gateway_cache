@@ -1,4 +1,4 @@
-module github.com/geniussportsgroup/gw_cache
+module github.com/geniussportsgroup/gateway_cache
 
 go 1.13
 
