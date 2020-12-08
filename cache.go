@@ -302,7 +302,7 @@ func (cache *CacheDriver) GetState() (string, error) {
 		NumEntries: cache.numEntries,
 	}
 
-	buf, err := json.Marshal(&state)
+	buf, err := json.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		return "", err
 	}
