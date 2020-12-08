@@ -289,7 +289,7 @@ type CacheState struct {
 }
 
 // Return a json containing the cache state. Use the internal mutex. Be careful with a deadlock
-func (cache *CacheDriver) GetState() ([]byte, error) {
+func (cache *CacheDriver) GetState() (string, error) {
 
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
@@ -302,7 +302,11 @@ func (cache *CacheDriver) GetState() ([]byte, error) {
 		NumEntries: cache.numEntries,
 	}
 
-	return json.Marshal(&state)
+	buf, err := json.Marshal(&state)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
 }
 
 // helper that does not take lock
