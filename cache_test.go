@@ -247,7 +247,7 @@ func TestCacheDriver_CacheState(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, state)
 
-	fmt.Print(string(state))
+	fmt.Print(state)
 }
 
 func TestCacheDriver_Clean(t *testing.T) {
@@ -277,7 +277,7 @@ func TestCacheDriver_Clean(t *testing.T) {
 	state, _ := cache.GetState()
 
 	var s CacheState
-	err = json.Unmarshal(state, &s)
+	err = json.Unmarshal([]byte(state), &s)
 
 	assert.Equal(t, 0, s.NumEntries)
 	assert.Equal(t, 0, s.HitCount)
