@@ -3,7 +3,6 @@ package gw_cache
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -169,15 +168,12 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	entry, hit = cache.table[cacheKey]
 	if hit && currTime.Before(entry.expirationTime) {
 		cache.hitCount++
-		fmt.Println("HIT")
 		cache.BecomeMru(entry)
 		cache.lock.Unlock()
 
 		entry.lock.Lock()              // will block if it is computing
 		for entry.state == COMPUTING { // this guard is for protection; it should never be true
-			fmt.Println("Waiting for uservices completion")
 			entry.cond.Wait() // it will wake up when result arrives
-			fmt.Println("Woke up!")
 		}
 		defer entry.lock.Unlock()
 		if entry.state == FAILED {
@@ -201,7 +197,6 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 
 	entry.state = COMPUTING
 
-	fmt.Println("MISS")
 	cache.missCount++
 	cache.lock.Unlock() // release global lock before to take the entry lock
 
