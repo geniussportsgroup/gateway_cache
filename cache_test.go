@@ -159,7 +159,7 @@ func TestEvictions(t *testing.T) {
 
 	// now we verify that entries en tbl are not in the cache
 	for req := range tbl {
-		assert.False(t, cache.Has(req))
+		assert.False(t, cache.has(req))
 	}
 }
 
@@ -168,7 +168,7 @@ func TestCacheDriver_Has(t *testing.T) {
 	cache, tbl := createCacheWithCapEntriesInside()
 
 	for req := range tbl {
-		assert.True(t, cache.Has(req))
+		assert.True(t, cache.has(req))
 	}
 }
 
@@ -201,7 +201,7 @@ func TestCacheDriver_testTTL(t *testing.T) {
 
 	time.Sleep(TTL) // wait for tt expiration
 
-	assert.False(t, cache.Has(request))
+	assert.False(t, cache.has(request))
 }
 
 func TestRandomTouches(t *testing.T) {
@@ -223,7 +223,7 @@ func TestRandomTouches(t *testing.T) {
 		err := json.Unmarshal(b.([]byte), &response)
 		assert.Nil(t, err)
 
-		assert.Equal(t, cache.GetMru().postProcessedResponse, b)
+		assert.Equal(t, cache.getMru().postProcessedResponse, b)
 	}
 }
 

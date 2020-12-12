@@ -3,7 +3,6 @@ package gw_cache
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -84,7 +83,7 @@ func New(capacity int, ttl time.Duration,
 }
 
 // Insert entry as the first item of cache (mru)
-func (cache *CacheDriver) InsertAsMru(entry *CacheEntry) {
+func (cache *CacheDriver) insertAsMru(entry *CacheEntry) {
 	entry.prev = &cache.head
 	entry.next = cache.head.next
 	cache.head.next.prev = entry
@@ -92,33 +91,33 @@ func (cache *CacheDriver) InsertAsMru(entry *CacheEntry) {
 }
 
 // Auto deletion of lru queue
-func (entry *CacheEntry) SelfDeleteFromLRUList() {
+func (entry *CacheEntry) selfDeleteFromLRUList() {
 	entry.prev.next = entry.next
 	entry.next.prev = entry.prev
 }
 
-func (cache *CacheDriver) BecomeMru(entry *CacheEntry) {
-	entry.SelfDeleteFromLRUList()
-	cache.InsertAsMru(entry)
+func (cache *CacheDriver) becomeMru(entry *CacheEntry) {
+	entry.selfDeleteFromLRUList()
+	cache.insertAsMru(entry)
 }
 
 // Rewove the last item in the list (lru); mutex must be taken. The entry becomes AVAILABLE
-func (cache *CacheDriver) EvictLruEntry() (*CacheEntry, error) {
+func (cache *CacheDriver) evictLruEntry() (*CacheEntry, error) {
 	entry := cache.head.prev // <-- LRU entry
 	if entry.state == COMPUTING {
 		err := errors.New("LRU entry is in COMPUTING state. This could be a bug or a cache misconfiguration")
 		return nil, err
 	}
-	entry.SelfDeleteFromLRUList()
+	entry.selfDeleteFromLRUList()
 	delete(cache.table, entry.cacheKey) // Key evicted
 	return entry, nil
 }
 
-func (cache *CacheDriver) AllocateEntry(cacheKey string,
+func (cache *CacheDriver) allocateEntry(cacheKey string,
 	currTime time.Time) (entry *CacheEntry, err error) {
 
 	if cache.numEntries == cache.capacity {
-		entry, err = cache.EvictLruEntry()
+		entry, err = cache.evictLruEntry()
 		if err != nil {
 			return nil, err
 		}
@@ -127,7 +126,7 @@ func (cache *CacheDriver) AllocateEntry(cacheKey string,
 		entry.cond = sync.NewCond(&entry.lock)
 		cache.numEntries++
 	}
-	cache.InsertAsMru(entry)
+	cache.insertAsMru(entry)
 	entry.cacheKey = cacheKey
 	entry.state = AVAILABLE
 	entry.timestamp = currTime
@@ -169,15 +168,12 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	entry, hit = cache.table[cacheKey]
 	if hit && currTime.Before(entry.expirationTime) {
 		cache.hitCount++
-		fmt.Println("HIT")
-		cache.BecomeMru(entry)
+		cache.becomeMru(entry)
 		cache.lock.Unlock()
 
 		entry.lock.Lock()              // will block if it is computing
 		for entry.state == COMPUTING { // this guard is for protection; it should never be true
-			fmt.Println("Waiting for uservices completion")
 			entry.cond.Wait() // it will wake up when result arrives
-			fmt.Println("Woke up!")
 		}
 		defer entry.lock.Unlock()
 		if entry.state == FAILED {
@@ -193,7 +189,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 
 	// In this point global cache lock is taken
 	// Request is not in cache
-	entry, err = cache.AllocateEntry(cacheKey, currTime)
+	entry, err = cache.allocateEntry(cacheKey, currTime)
 	if err != nil {
 		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
 		return cache.callUServices(request, payload, other...)
@@ -201,7 +197,6 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 
 	entry.state = COMPUTING
 
-	fmt.Println("MISS")
 	cache.missCount++
 	cache.lock.Unlock() // release global lock before to take the entry lock
 
@@ -221,15 +216,15 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	return retVal, requestError
 }
 
-// Remove entry from cache.Mutex must be taken
-func (cache *CacheDriver) Remove(entry *CacheEntry) {
-	entry.SelfDeleteFromLRUList()
+// remove entry from cache.Mutex must be taken
+func (cache *CacheDriver) remove(entry *CacheEntry) {
+	entry.selfDeleteFromLRUList()
 	delete(cache.table, entry.cacheKey)
 	cache.numEntries--
 }
 
-// Has return true is state in the cache
-func (cache *CacheDriver) Has(val interface{}) bool {
+// has return true is state in the cache
+func (cache *CacheDriver) has(val interface{}) bool {
 	key, err := cache.toMapKey(val)
 	if err != nil {
 		return false
@@ -239,7 +234,7 @@ func (cache *CacheDriver) Has(val interface{}) bool {
 }
 
 // Return the lru without moving it from the queue
-func (cache *CacheDriver) GetLru() *CacheEntry {
+func (cache *CacheDriver) getLru() *CacheEntry {
 	if cache.numEntries == 0 {
 		return nil
 	}
@@ -247,7 +242,7 @@ func (cache *CacheDriver) GetLru() *CacheEntry {
 }
 
 // Return the mru without moving it from the queue
-func (cache *CacheDriver) GetMru() *CacheEntry {
+func (cache *CacheDriver) getMru() *CacheEntry {
 	if cache.numEntries == 0 {
 		return nil
 	}
