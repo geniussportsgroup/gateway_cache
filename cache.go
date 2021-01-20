@@ -11,11 +11,13 @@ const (
 	AVAILABLE = iota
 	COMPUTING
 	COMPUTED
-	FAILED
+	FAILED5xx
+	FAILED4xx
 )
 
 const (
 	Status4xx = iota
+	Status4xxCached
 	Status5xx
 	Status5xxCached
 )
@@ -176,10 +178,15 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 			entry.cond.Wait() // it will wake up when result arrives
 		}
 		defer entry.lock.Unlock()
-		if entry.state == FAILED {
+		if entry.state == FAILED5xx {
 			return nil, &RequestError{
 				Error: errors.New("uservice failed to preProcessRequest the match state (cached)"),
-				Code:  Status5xxCached,
+				Code:  Status5xxCached, // include 4xx and 5xx
+			}
+		} else if entry.state == FAILED4xx {
+			return nil, &RequestError{
+				Error: errors.New("uservice failed to preProcessRequest the match state (cached)"),
+				Code:  Status4xxCached, // include 4xx and 5xx
 			}
 		}
 		entry.timestamp = currTime
@@ -205,7 +212,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	var retVal interface{} = nil // Explicit initialization for understanding flow!
 	retVal, requestError = cache.callUServices(request, payload, other...)
 	if requestError != nil {
-		entry.state = FAILED
+		entry.state = int8(requestError.Code) // include 4xx and 5xx
 	} else {
 		entry.state = COMPUTED
 	}
