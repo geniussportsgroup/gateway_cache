@@ -213,10 +213,12 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	retVal, requestError = cache.callUServices(request, payload, other...)
 	if requestError != nil {
 		switch requestError.Code {
-		case FAILED4xx:
-			entry.state = Status4xxCached
-		case FAILED5xx:
-			entry.state = Status5xxCached
+		case Status4xx:
+		case Status4xxCached:
+			entry.state = FAILED4xx
+		case Status5xx:
+		case Status5xxCached:
+			entry.state = FAILED5xx
 		}
 	} else {
 		entry.state = COMPUTED
