@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// State that a cache entry could have
 const (
 	AVAILABLE = iota
 	COMPUTING
@@ -22,16 +23,17 @@ const (
 	Status5xxCached
 )
 
+// CacheEntry Every cache entry has this information
 type CacheEntry struct {
-	cacheKey              string // key stringficated; needed for removal operation
-	lock                  sync.Mutex
-	cond                  *sync.Cond
+	cacheKey              string     // key stringficated; needed for removal operation
+	lock                  sync.Mutex // lock for repeated requests
+	cond                  *sync.Cond // used in conjunction with the lock for repeating repeated request until result is ready
 	postProcessedResponse interface{}
 	timestamp             time.Time // Last time accessed
 	expirationTime        time.Time
 	prev                  *CacheEntry
 	next                  *CacheEntry
-	state                 int8
+	state                 int8 // AVAILABLE, COMPUTING, etc
 }
 
 type RequestError struct {
@@ -53,7 +55,7 @@ type CacheDriver struct {
 	callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
 }
 
-// Creates a new cache. Parameters are:
+// New Creates a new cache. Parameters are:
 //
 // capacity: maximum number of entries that cache can manage without evicting the least recentrly used
 // ttl: time to live of a cache entry
@@ -138,7 +140,9 @@ func (cache *CacheDriver) allocateEntry(cacheKey string,
 	return entry, nil
 }
 
-// Search Request in the cache and return a locked entry
+// RetrieveFromCacheOrCompute Search Request in the cache. If the request is already computed, then it
+// immediately return the cached entry. If the request is the first, then it blocks until the result is
+// ready. If the request is not the first but the result is not still ready, the it blocks until the result is ready
 func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	other ...interface{}) (interface{}, *RequestError) {
 
@@ -261,7 +265,7 @@ func (cache *CacheDriver) getMru() *CacheEntry {
 	return cache.head.next
 }
 
-// Iterator on cache entries. Go from MUR to LRU
+// CacheIt Iterator on cache entries. Go from MUR to LRU
 type CacheIt struct {
 	cachePtr *CacheDriver
 	curr     *CacheEntry
@@ -295,7 +299,7 @@ type CacheState struct {
 	NumEntries int
 }
 
-// Return a json containing the cache state. Use the internal mutex. Be careful with a deadlock
+// GetState Return a json containing the cache state. Use the internal mutex. Be careful with a deadlock
 func (cache *CacheDriver) GetState() (string, error) {
 
 	cache.lock.Lock()
@@ -339,7 +343,7 @@ func (cache *CacheDriver) clean() error {
 	return nil
 }
 
-// Try to clean the cache. All the entries are deleted and counters reset. Fails if any entry is in COMPUTING
+// Clean Try to clean the cache. All the entries are deleted and counters reset. Fails if any entry is in COMPUTING
 // state.
 //
 // Uses internal lock
