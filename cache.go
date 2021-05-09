@@ -3,6 +3,7 @@ package gw_cache
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"sync"
 	"time"
 )
@@ -22,6 +23,9 @@ const (
 	Status5xx
 	Status5xxCached
 )
+
+// CacheCapacityFactor factor by which capacity is increased so to mitigate table resizes
+const CacheCapacityFactor = 0.30
 
 // CacheEntry Every cache entry has this information
 type CacheEntry struct {
@@ -69,13 +73,14 @@ func New(capacity int, ttl time.Duration,
 	callUServices func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError),
 ) *CacheDriver {
 
+	extendedCapacity := math.Ceil(1.0 * CacheCapacityFactor * float64(capacity))
 	ret := &CacheDriver{
 		missCount:         0,
 		hitCount:          0,
 		capacity:          capacity,
 		numEntries:        0,
 		ttl:               ttl,
-		table:             make(map[string]*CacheEntry),
+		table:             make(map[string]*CacheEntry, int(extendedCapacity)),
 		toMapKey:          toMapKey,
 		preProcessRequest: preProcessRequest,
 		callUServices:     callUServices,
