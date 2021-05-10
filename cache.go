@@ -25,7 +25,7 @@ const (
 )
 
 // CacheCapacityFactor factor by which capacity is increased so to mitigate table resizes
-const CacheCapacityFactor = 0.40
+const CacheCapacityFactor = 0.30
 
 // CacheEntry Every cache entry has this information
 type CacheEntry struct {
