@@ -25,7 +25,7 @@ const (
 )
 
 // CacheCapacityFactor factor by which capacity is increased so to mitigate table resizes
-const CacheCapacityFactor = 0.30
+const CacheCapacityFactor = 0.40
 
 // CacheEntry Every cache entry has this information
 type CacheEntry struct {
@@ -53,10 +53,35 @@ type CacheDriver struct {
 	head              CacheEntry // sentinel header node
 	lock              sync.Mutex
 	capacity          int
+	extendedCapacity  int
 	numEntries        int
 	toMapKey          func(key interface{}) (string, error)
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError)
 	callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
+}
+
+func (cache *CacheDriver) MissCount() int {
+	return cache.missCount
+}
+
+func (cache *CacheDriver) HitCount() int {
+	return cache.hitCount
+}
+
+func (cache *CacheDriver) Ttl() time.Duration {
+	return cache.ttl
+}
+
+func (cache *CacheDriver) Capacity() int {
+	return cache.capacity
+}
+
+func (cache *CacheDriver) ExtendedCapacity() int {
+	return cache.extendedCapacity
+}
+
+func (cache *CacheDriver) NumEntries() int {
+	return cache.numEntries
 }
 
 // New Creates a new cache. Parameters are:
@@ -73,11 +98,12 @@ func New(capacity int, ttl time.Duration,
 	callUServices func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError),
 ) *CacheDriver {
 
-	extendedCapacity := math.Ceil(1.0 * CacheCapacityFactor * float64(capacity))
+	extendedCapacity := math.Ceil((1.0 + CacheCapacityFactor) * float64(capacity))
 	ret := &CacheDriver{
 		missCount:         0,
 		hitCount:          0,
 		capacity:          capacity,
+		extendedCapacity:  int(extendedCapacity),
 		numEntries:        0,
 		ttl:               ttl,
 		table:             make(map[string]*CacheEntry, int(extendedCapacity)),

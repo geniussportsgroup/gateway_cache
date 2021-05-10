@@ -90,6 +90,7 @@ func TestNew(t *testing.T) {
 	assert.Equal(t, 0, cache.hitCount)
 	assert.Equal(t, 0, cache.missCount)
 	assert.Equal(t, 0, cache.numEntries)
+	assert.Less(t, cache.capacity, cache.extendedCapacity)
 }
 
 const Capacity = 31
