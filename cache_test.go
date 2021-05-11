@@ -93,6 +93,17 @@ func TestNew(t *testing.T) {
 	assert.Less(t, cache.capacity, cache.extendedCapacity)
 }
 
+func TestBadFactor(t *testing.T) {
+
+	assert.Panics(t, func() {
+		New(100, .099, time.Minute, toKey, nil, callServices)
+	})
+
+	assert.Panics(t, func() {
+		New(100, 3.00001, time.Minute, toKey, nil, callServices)
+	})
+}
+
 const Capacity = 31
 const TTL = 15 * time.Second
 
