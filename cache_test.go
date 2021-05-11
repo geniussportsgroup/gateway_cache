@@ -83,7 +83,7 @@ func callServices(request, _ interface{}, other ...interface{}) (interface{}, *R
 
 func TestNew(t *testing.T) {
 
-	cache := New(100, time.Minute, toKey, preProcessRequest, callServices)
+	cache := New(100, .4, time.Minute, toKey, preProcessRequest, callServices)
 
 	assert.Equal(t, 100, cache.capacity)
 	assert.Equal(t, time.Minute, cache.ttl)
@@ -98,7 +98,7 @@ const TTL = 15 * time.Second
 
 func createCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 
-	cache := New(Capacity, TTL, toKey, preProcessRequest, callServices)
+	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
 
 	requestTbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -117,7 +117,7 @@ func createCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 
 func TestCacheProcessing(t *testing.T) {
 
-	cache := New(Capacity, TTL, toKey, preProcessRequest, callServices)
+	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
 
 	var response Response
 
@@ -188,7 +188,7 @@ func TestLRUOrder(t *testing.T) {
 
 func TestCacheDriver_testTTL(t *testing.T) {
 
-	cache := New(Capacity, TTL, toKey, preProcessRequest, callServices)
+	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
 
 	request := &RequestEntry{
 		N:    10,
@@ -308,7 +308,7 @@ func TestConcurrency(t *testing.T) {
 	const SuperCap = 3037
 	const NumRepeatedCalls = 50
 
-	cache := New(SuperCap, 30*time.Second, toKey, preProcessRequest, callServices)
+	cache := New(SuperCap, .3, 30*time.Second, toKey, preProcessRequest, callServices)
 
 	tbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {

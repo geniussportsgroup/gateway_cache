@@ -3,6 +3,7 @@ package gw_cache
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -86,19 +87,32 @@ func (cache *CacheDriver) NumEntries() int {
 
 // New Creates a new cache. Parameters are:
 //
-// capacity: maximum number of entries that cache can manage without evicting the least recentrly used
+// capacity: maximum number of entries that cache can manage without evicting the least recently used
+//
+// capFactor is a number in (0.1, 3] that indicates how long the cache should be oversize in order to avoid rehashing
+//
 // ttl: time to live of a cache entry
+//
+// toMapKey is a function in charge of transforming the request into a string
+//
+// preProcessRequest is an optional function that could be used for validation, transforming
+// the request in a more suitable form, etc.
 //
 // callUService: is responsible of calling to the service and building a byte sequence corresponding to the
 // service response
 //
-func New(capacity int, ttl time.Duration,
+func New(capacity int, capFactor float64, ttl time.Duration,
 	toMapKey func(key interface{}) (string, error),
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
 	callUServices func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError),
 ) *CacheDriver {
 
-	extendedCapacity := math.Ceil((1.0 + CacheCapacityFactor) * float64(capacity))
+	if capFactor < 0.1 || capFactor > 3.0 {
+		panic(fmt.Sprintf("invalid capFactor %f. It should be in [0.1, 3]",
+			capFactor))
+	}
+
+	extendedCapacity := math.Ceil((1.0 + capFactor) * float64(capacity))
 	ret := &CacheDriver{
 		missCount:         0,
 		hitCount:          0,
