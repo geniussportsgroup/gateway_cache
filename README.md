@@ -1,35 +1,29 @@
-# 
+# A cache for API gateways
 
-\# gateway\_cache A cache for API gateways
-
-  
-
-\`gateway\_cache\` implements a simple cache from HTTP request to their responses. An essential quality is that the cache can receive repeated requests before the first one has been computed. I such a case, the repeated request will wait without contention for other different requests until the response is ready.
+gateway\_cache implements a simple cache from HTTP request to their responses. An essential quality is that the cache can receive repeated requests before the first one has been computed. I such a case, the repeated request will wait without contention for other different requests until the response is ready.
 
   
 
 Once the response is ready, the runtime will free the retained repeated requests, and the flow will continue in a usual way.
 
-  
-
-\## Declaration
+## Declaration
 
   
 
-\## Usage
+### Usage
 
   
 
-\## Notes on its implementation
+### Notes on its implementation
 
   
 
-\### Parameters selection
+Parameters selection
 
   
 
-\### Liveness danger
+Liveness danger
 
   
 
-\### Hash Table
+Hash Table
