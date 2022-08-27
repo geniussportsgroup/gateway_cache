@@ -32,7 +32,7 @@ const CacheCapacityFactor = 0.30
 type CacheEntry struct {
 	cacheKey              string     // key stringficated; needed for removal operation
 	lock                  sync.Mutex // lock for repeated requests
-	cond                  *sync.Cond // used in conjunction with the lock for repeating repeated request until result is ready
+	cond                  *sync.Cond // used in conjunction with the lock for repeated request until result is ready
 	postProcessedResponse interface{}
 	timestamp             time.Time // Last time accessed
 	expirationTime        time.Time
@@ -98,7 +98,7 @@ func (cache *CacheDriver) NumEntries() int {
 // preProcessRequest is an optional function that could be used for validation, transforming
 // the request in a more suitable form, etc.
 //
-// callUService: is responsible of calling to the service and building a byte sequence corresponding to the
+// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
 // service response
 //
 func New(capacity int, capFactor float64, ttl time.Duration,
@@ -186,8 +186,9 @@ func (cache *CacheDriver) allocateEntry(cacheKey string,
 }
 
 // RetrieveFromCacheOrCompute Search Request in the cache. If the request is already computed, then it
-// immediately return the cached entry. If the request is the first, then it blocks until the result is
-// ready. If the request is not the first but the result is not still ready, the it blocks until the result is ready
+// immediately returns the cached entry. If the request is the first, then it blocks until the result is
+// ready. If the request is not the first but the result is not still ready, then it blocks
+// until the result is ready
 func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	other ...interface{}) (interface{}, *RequestError) {
 
