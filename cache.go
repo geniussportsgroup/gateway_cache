@@ -25,9 +25,6 @@ const (
 	Status5xxCached
 )
 
-// CacheCapacityFactor factor by which capacity is increased so to mitigate table resizes
-const CacheCapacityFactor = 0.30
-
 // CacheEntry Every cache entry has this information
 type CacheEntry struct {
 	cacheKey              string     // key stringficated; needed for removal operation
@@ -56,6 +53,7 @@ type CacheDriver struct {
 	capacity          int
 	extendedCapacity  int
 	numEntries        int
+	toCompress        bool
 	toMapKey          func(key interface{}) (string, error)
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError)
 	callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
@@ -129,6 +127,20 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 	ret.head.next = &ret.head
 
 	return ret
+}
+
+func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
+	toMapKey func(key interface{}) (string, error),
+	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
+	callUServices func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError),
+) (cache *CacheDriver) {
+
+	cache = New(capacity, capFactor, ttl, toMapKey, preProcessRequest, callUServices)
+	if cache != nil {
+		cache.toCompress = true
+	}
+
+	return cache
 }
 
 // Insert entry as the first item of cache (mru)
@@ -217,6 +229,8 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	currTime := time.Now()
 	cache.lock.Lock()
 
+	withCompression := cache.toCompress
+
 	entry, hit = cache.table[cacheKey]
 	if hit && currTime.Before(entry.expirationTime) {
 		cache.hitCount++
@@ -241,6 +255,18 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		}
 		entry.timestamp = currTime
 		entry.expirationTime = currTime.Add(cache.ttl)
+
+		if withCompression {
+			buf, err := lz4Decompress(entry.postProcessedResponse.([]byte))
+			if err != nil {
+				return nil, &RequestError{
+					Error: errors.New("cannot decompress stored message"),
+					Code:  Status5xx, // include 4xx and 5xx
+				}
+			}
+			return buf, nil
+		}
+
 		return entry.postProcessedResponse, nil
 	}
 
@@ -271,7 +297,16 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	} else {
 		entry.state = COMPUTED
 	}
-	entry.postProcessedResponse = retVal
+
+	if withCompression {
+		entry.postProcessedResponse, err = lz4Compress(retVal.([]byte))
+		if err != nil {
+			entry.state = FAILED5xx
+		}
+	} else {
+		entry.postProcessedResponse = retVal
+	}
+
 	entry.lock.Unlock()
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
