@@ -126,6 +126,25 @@ func createCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 	return cache, requestTbl
 }
 
+func createCompressedCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
+
+	cache := NewWithCompression(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
+
+	requestTbl := make(map[*RequestEntry]bool)
+	for i := 0; i < Capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
+
+		str := strconv.Itoa(i)
+		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
+		requestTbl[request] = true
+	}
+
+	return cache, requestTbl
+}
+
 func TestCacheProcessing(t *testing.T) {
 
 	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
@@ -219,6 +238,29 @@ func TestCacheDriver_testTTL(t *testing.T) {
 
 func TestRandomTouches(t *testing.T) {
 	cache, tbl := createCacheWithCapEntriesInside()
+
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
+
+	var response Response
+	for i := 0; i < 1e6; i++ {
+		i := rand.Intn(N)
+		req := requests[i]
+		b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		assert.Nil(t, requestError)
+
+		err := json.Unmarshal(b.([]byte), &response)
+		assert.Nil(t, err)
+
+		assert.Equal(t, cache.getMru().postProcessedResponse, b)
+	}
+}
+
+func TestCompressRandomTouches(t *testing.T) {
+	cache, tbl := createCompressedCacheWithCapEntriesInside()
 
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
@@ -340,6 +382,64 @@ func TestConcurrency(t *testing.T) {
 	}
 
 	for i := 0; i < 1e4; i++ {
+		wg := sync.WaitGroup{}
+		wg.Add(ConcurrencyLevel)
+		for k := 0; k < ConcurrencyLevel; k++ {
+
+			go func() { // goroutine emulates an avalanche of repeated requests
+
+				idx := rand.Intn(N) // choose request randomly
+				req := requests[idx]
+
+				// now we simulate the avalanche
+				for j := 0; j < NumRepeatedCalls; j++ {
+
+					go func() {
+						b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+						assert.Nil(t, requestError)
+
+						var response Response
+						err := json.Unmarshal(b.([]byte), &response)
+						assert.Nil(t, err)
+					}()
+
+				}
+
+				wg.Done()
+			}()
+
+		}
+		wg.Wait()
+	}
+}
+
+func TestConcurrencyAndCompress(t *testing.T) {
+
+	const ConcurrencyLevel = 10
+	const SuperCap = 1019
+	const NumRepeatedCalls = 20
+
+	cache := NewWithCompression(SuperCap, .3, 30*time.Second, toKey, preProcessRequest, callServices)
+
+	tbl := make(map[*RequestEntry]bool)
+	for i := 0; i < Capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
+
+		str := strconv.Itoa(i)
+		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
+		tbl[request] = true
+	}
+
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
+
+	for i := 0; i < 1e3; i++ {
 		wg := sync.WaitGroup{}
 		wg.Add(ConcurrencyLevel)
 		for k := 0; k < ConcurrencyLevel; k++ {
