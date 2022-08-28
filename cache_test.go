@@ -39,6 +39,26 @@ func toKey(entry interface{}) (string, error) {
 	return string(b), nil
 }
 
+func toBytes(value interface{}) ([]byte, error) {
+
+	response := value.(*Response)
+	b, err := json.Marshal(response)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func toVal(buf []byte) (interface{}, error) {
+
+	response := &Response{}
+	err := json.Unmarshal(buf, response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
 func preProcessRequest(request interface{}, other ...interface{}) (interface{}, *RequestError) {
 
 	entry := request.(*RequestEntry)
@@ -128,7 +148,8 @@ func createCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 
 func createCompressedCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 
-	cache := NewWithCompression(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
+	cache := NewWithCompression(Capacity, .4, TTL, toKey, toBytes, toVal,
+		preProcessRequest, callServices)
 
 	requestTbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -143,6 +164,25 @@ func createCompressedCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntr
 	}
 
 	return cache, requestTbl
+}
+
+func TestCompress(t *testing.T) {
+
+	callFct := func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError) {
+
+		value := "This is a payload: A thing of beauty is a joy forever ..."
+		return value, nil
+	}
+
+	cache := NewWithCompression(Capacity, .4, 3*time.Minute,
+		func(key interface{}) (string, error) { return key.(string), nil },
+		func(value interface{}) ([]byte, error) { return []byte(value.(string)), nil },
+		func(bytes []byte) (interface{}, error) { return string(bytes), nil },
+		nil, callFct)
+
+	val, ptr := cache.RetrieveFromCacheOrCompute("Keats")
+	assert.Nil(t, ptr)
+	assert.Equal(t, val, "This is a payload: A thing of beauty is a joy forever ...")
 }
 
 func TestCacheProcessing(t *testing.T) {
@@ -419,7 +459,8 @@ func TestConcurrencyAndCompress(t *testing.T) {
 	const SuperCap = 1019
 	const NumRepeatedCalls = 20
 
-	cache := NewWithCompression(SuperCap, .3, 30*time.Second, toKey, preProcessRequest, callServices)
+	cache := NewWithCompression(SuperCap, .3, 30*time.Second, toKey, toBytes, toVal,
+		preProcessRequest, callServices)
 
 	tbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {

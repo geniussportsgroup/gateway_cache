@@ -55,6 +55,8 @@ type CacheDriver struct {
 	numEntries        int
 	toCompress        bool
 	toMapKey          func(key interface{}) (string, error)
+	valueToBytes      func(value interface{}) ([]byte, error)
+	bytesToValue      func([]byte) (interface{}, error)
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError)
 	callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
 }
@@ -131,13 +133,18 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 
 func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
 	toMapKey func(key interface{}) (string, error),
+	valueToBytes func(value interface{}) ([]byte, error),
+	bytesToValue func([]byte) (interface{}, error),
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
-	callUServices func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError),
+	callUServices func(request, payload interface{},
+		other ...interface{}) (interface{}, *RequestError),
 ) (cache *CacheDriver) {
 
 	cache = New(capacity, capFactor, ttl, toMapKey, preProcessRequest, callUServices)
 	if cache != nil {
 		cache.toCompress = true
+		cache.valueToBytes = valueToBytes
+		cache.bytesToValue = bytesToValue
 	}
 
 	return cache
@@ -264,7 +271,14 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 					Code:  Status5xx, // include 4xx and 5xx
 				}
 			}
-			return buf, nil
+			result, err := cache.bytesToValue(buf)
+			if err != nil {
+				return nil, &RequestError{
+					Error: errors.New("cannot convert decompressed stored message"),
+					Code:  Status5xx, // include 4xx and 5xx
+				}
+			}
+			return result, nil
 		}
 
 		return entry.postProcessedResponse, nil
@@ -299,10 +313,15 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	}
 
 	if withCompression {
-		entry.postProcessedResponse, err = lz4Compress(retVal.([]byte))
+		buf, err := cache.valueToBytes(retVal)
 		if err != nil {
 			entry.state = FAILED5xx
 		}
+		lz4Buf, err := lz4Compress(buf)
+		if err != nil {
+			entry.state = FAILED5xx
+		}
+		entry.postProcessedResponse = lz4Buf
 	} else {
 		entry.postProcessedResponse = retVal
 	}
