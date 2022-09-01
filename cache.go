@@ -131,6 +131,37 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 	return ret
 }
 
+// NewWithCompression Creates a new cache with compressed entries.
+//
+// The constructor is some similar to the version that does not compress. The difference is
+// that in order to compress, the cache needs a serialized representation of what will be
+// stored into the cache. For that reason, the constructor receives two additional functions.
+// The first function, ValueToBytes transforms the value into a byte slice (type []byte). The
+// second function, bytesToValue, takes a serialized representation of the value stored into the
+// cache, and it transforms it to the original representation.
+//
+// Parameters are:
+//
+// capacity: maximum number of entries that cache can manage without evicting the least recently used
+//
+// capFactor is a number in (0.1, 3] that indicates how long the cache should be oversize in order to avoid rehashing
+//
+// ttl: time to live of a cache entry
+//
+// toMapKey is a function in charge of transforming the request into a string
+//
+// valueToBytes transforms the value into a []byte
+//
+// bytesToValue transforms a []byte into the original value representation
+//
+// valueToBytes
+//
+// preProcessRequest is an optional function that could be used for validation, transforming
+// the request in a more suitable form, etc.
+//
+// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
+// service response
+//
 func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
 	toMapKey func(key interface{}) (string, error),
 	valueToBytes func(value interface{}) ([]byte, error),
@@ -313,7 +344,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	}
 
 	if withCompression {
-		buf, err := cache.valueToBytes(retVal)
+		buf, err := cache.valueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
 			entry.state = FAILED5xx
 		}
@@ -321,7 +352,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		if err != nil {
 			entry.state = FAILED5xx
 		}
-		entry.postProcessedResponse = lz4Buf
+		entry.postProcessedResponse = lz4Buf // stores the compressed representation
 	} else {
 		entry.postProcessedResponse = retVal
 	}

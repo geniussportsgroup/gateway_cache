@@ -12,6 +12,31 @@ import (
 	"time"
 )
 
+var keats string = `A thing of beauty is a joy for ever:\n
+Its loveliness increases; it will never\n
+Pass into nothingness; but still will keep\n
+A bower quiet for us, and a sleep\n
+Full of sweet dreams, and health, and quiet breathing.\n
+Therefore, on every morrow, are we wreathing\n
+A flowery band to bind us to the earth,\n
+Spite of despondence, of the inhuman dearth\n
+Of noble natures, of the gloomy days,\n
+Of all the unhealthy and o'er-darkened ways\n
+Made for our searching: yes, in spite of all,\n
+Some shape of beauty moves away the pall\n
+From our dark spirits. Such the sun, the moon,\n
+Trees old, and young, sprouting a shady boon\n
+For simple sheep; and such are daffodils\n
+With the green world they live in; and clear rills\n
+That for themselves a cooling covert make\n
+'Gainst the hot season; the mid forest brake,\n
+Rich with a sprinkling of fair musk-rose blooms:\n
+And such too is the grandeur of the dooms\n
+We have imagined for the mighty dead;\n
+All lovely tales that we have heard or read:\n
+An endless fountain of immortal drink,\n
+Pouring unto us from the heaven's brink.\n`
+
 type RequestEntry struct {
 	N        int
 	Time     time.Time
@@ -29,6 +54,7 @@ type UResponse struct {
 
 type Response struct {
 	Uresponse *UResponse
+	Poem      string
 }
 
 func toKey(entry interface{}) (string, error) {
@@ -101,6 +127,23 @@ func callServices(request, _ interface{}, other ...interface{}) (interface{}, *R
 	return b, nil
 }
 
+func callServicesWithCompression(request, _ interface{}, other ...interface{}) (interface{}, *RequestError) {
+
+	entry := request.(*RequestEntry)
+	urequest := &URequest{
+		Request:  entry,
+		PutValue: entry.PutValue + "-" + other[1].(string),
+	}
+
+	uresponse := &UResponse{Urequest: urequest}
+	response := &Response{
+		Uresponse: uresponse,
+		Poem:      keats,
+	}
+
+	return response, nil
+}
+
 func TestNew(t *testing.T) {
 
 	cache := New(100, .4, time.Minute, toKey, preProcessRequest, callServices)
@@ -149,7 +192,7 @@ func createCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 func createCompressedCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
 
 	cache := NewWithCompression(Capacity, .4, TTL, toKey, toBytes, toVal,
-		preProcessRequest, callServices)
+		preProcessRequest, callServicesWithCompression)
 
 	requestTbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -170,7 +213,7 @@ func TestCompress(t *testing.T) {
 
 	callFct := func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError) {
 
-		value := "This is a payload: A thing of beauty is a joy forever ..."
+		value := keats
 		return value, nil
 	}
 
@@ -182,7 +225,11 @@ func TestCompress(t *testing.T) {
 
 	val, ptr := cache.RetrieveFromCacheOrCompute("Keats")
 	assert.Nil(t, ptr)
-	assert.Equal(t, val, "This is a payload: A thing of beauty is a joy forever ...")
+	assert.Equal(t, val, keats)
+
+	val, ptr = cache.RetrieveFromCacheOrCompute("Keats")
+	assert.Nil(t, ptr)
+	assert.Equal(t, val, keats)
 }
 
 func TestCacheProcessing(t *testing.T) {
@@ -308,17 +355,32 @@ func TestCompressRandomTouches(t *testing.T) {
 		requests = append(requests, req)
 	}
 
-	var response Response
 	for i := 0; i < 1e6; i++ {
 		i := rand.Intn(N)
 		req := requests[i]
-		b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		response, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
 		assert.Nil(t, requestError)
 
-		err := json.Unmarshal(b.([]byte), &response)
+		compressedValue := cache.getMru().postProcessedResponse
+		decompressedValue, _ := lz4Decompress(compressedValue.([]byte))
+		value := &Response{
+			Uresponse: &UResponse{Urequest: &URequest{
+				Request: &RequestEntry{
+					N:        0,
+					Time:     time.Time{},
+					PutValue: "",
+				},
+				PutValue: "",
+			}},
+			Poem: "",
+		}
+		err := json.Unmarshal(decompressedValue, value)
 		assert.Nil(t, err)
-
-		assert.Equal(t, cache.getMru().postProcessedResponse, b)
+		ref := response.(*Response)
+		assert.Equal(t, ref.Poem, value.Poem)
+		assert.Equal(t, ref.Uresponse.Urequest.Request.N, value.Uresponse.Urequest.Request.N)
+		assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, value.Uresponse.Urequest.Request.PutValue)
+		assert.Equal(t, ref.Uresponse.Urequest.PutValue, value.Uresponse.Urequest.PutValue)
 	}
 }
 
@@ -460,7 +522,7 @@ func TestConcurrencyAndCompress(t *testing.T) {
 	const NumRepeatedCalls = 20
 
 	cache := NewWithCompression(SuperCap, .3, 30*time.Second, toKey, toBytes, toVal,
-		preProcessRequest, callServices)
+		preProcessRequest, callServicesWithCompression)
 
 	tbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -493,15 +555,15 @@ func TestConcurrencyAndCompress(t *testing.T) {
 				// now we simulate the avalanche
 				for j := 0; j < NumRepeatedCalls; j++ {
 
-					go func() {
-						b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+					go func(request *RequestEntry) {
+						response, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
 						assert.Nil(t, requestError)
 
-						var response Response
-						err := json.Unmarshal(b.([]byte), &response)
-						assert.Nil(t, err)
-					}()
-
+						ref := response.(*Response)
+						assert.Equal(t, ref.Uresponse.Urequest.Request.N, request.N)
+						assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, request.PutValue)
+						assert.Equal(t, ref.Poem, keats)
+					}(req)
 				}
 
 				wg.Done()
