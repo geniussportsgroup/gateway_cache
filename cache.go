@@ -23,6 +23,7 @@ const (
 	Status4xxCached
 	Status5xx
 	Status5xxCached
+	StatusUser
 )
 
 // CacheEntry Every cache entry has this information
