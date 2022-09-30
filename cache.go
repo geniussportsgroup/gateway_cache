@@ -209,6 +209,7 @@ func (cache *CacheDriver) evictLruEntry() (*CacheEntry, error) {
 		return nil, err
 	}
 	entry.selfDeleteFromLRUList()
+	cache.table[entry.cacheKey] = nil
 	delete(cache.table, entry.cacheKey) // Key evicted
 	return entry, nil
 }
@@ -367,6 +368,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 // remove entry from cache.Mutex must be taken
 func (cache *CacheDriver) remove(entry *CacheEntry) {
 	entry.selfDeleteFromLRUList()
+	cache.table[entry.cacheKey] = nil
 	delete(cache.table, entry.cacheKey)
 	cache.numEntries--
 }
