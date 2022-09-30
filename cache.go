@@ -23,16 +23,14 @@ const (
 	Status4xxCached
 	Status5xx
 	Status5xxCached
+	StatusUser
 )
-
-// CacheCapacityFactor factor by which capacity is increased so to mitigate table resizes
-const CacheCapacityFactor = 0.30
 
 // CacheEntry Every cache entry has this information
 type CacheEntry struct {
 	cacheKey              string     // key stringficated; needed for removal operation
 	lock                  sync.Mutex // lock for repeated requests
-	cond                  *sync.Cond // used in conjunction with the lock for repeating repeated request until result is ready
+	cond                  *sync.Cond // used in conjunction with the lock for repeated request until result is ready
 	postProcessedResponse interface{}
 	timestamp             time.Time // Last time accessed
 	expirationTime        time.Time
@@ -56,7 +54,10 @@ type CacheDriver struct {
 	capacity          int
 	extendedCapacity  int
 	numEntries        int
+	toCompress        bool
 	toMapKey          func(key interface{}) (string, error)
+	valueToBytes      func(value interface{}) ([]byte, error)
+	bytesToValue      func([]byte) (interface{}, error)
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError)
 	callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
 }
@@ -98,7 +99,7 @@ func (cache *CacheDriver) NumEntries() int {
 // preProcessRequest is an optional function that could be used for validation, transforming
 // the request in a more suitable form, etc.
 //
-// callUService: is responsible of calling to the service and building a byte sequence corresponding to the
+// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
 // service response
 //
 func New(capacity int, capFactor float64, ttl time.Duration,
@@ -131,6 +132,56 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 	return ret
 }
 
+// NewWithCompression Creates a new cache with compressed entries.
+//
+// The constructor is some similar to the version that does not compress. The difference is
+// that in order to compress, the cache needs a serialized representation of what will be
+// stored into the cache. For that reason, the constructor receives two additional functions.
+// The first function, ValueToBytes transforms the value into a byte slice (type []byte). The
+// second function, bytesToValue, takes a serialized representation of the value stored into the
+// cache, and it transforms it to the original representation.
+//
+// Parameters are:
+//
+// capacity: maximum number of entries that cache can manage without evicting the least recently used
+//
+// capFactor is a number in (0.1, 3] that indicates how long the cache should be oversize in order to avoid rehashing
+//
+// ttl: time to live of a cache entry
+//
+// toMapKey is a function in charge of transforming the request into a string
+//
+// valueToBytes transforms the value into a []byte
+//
+// bytesToValue transforms a []byte into the original value representation
+//
+// valueToBytes
+//
+// preProcessRequest is an optional function that could be used for validation, transforming
+// the request in a more suitable form, etc.
+//
+// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
+// service response
+//
+func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
+	toMapKey func(key interface{}) (string, error),
+	valueToBytes func(value interface{}) ([]byte, error),
+	bytesToValue func([]byte) (interface{}, error),
+	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
+	callUServices func(request, payload interface{},
+		other ...interface{}) (interface{}, *RequestError),
+) (cache *CacheDriver) {
+
+	cache = New(capacity, capFactor, ttl, toMapKey, preProcessRequest, callUServices)
+	if cache != nil {
+		cache.toCompress = true
+		cache.valueToBytes = valueToBytes
+		cache.bytesToValue = bytesToValue
+	}
+
+	return cache
+}
+
 // Insert entry as the first item of cache (mru)
 func (cache *CacheDriver) insertAsMru(entry *CacheEntry) {
 	entry.prev = &cache.head
@@ -158,6 +209,7 @@ func (cache *CacheDriver) evictLruEntry() (*CacheEntry, error) {
 		return nil, err
 	}
 	entry.selfDeleteFromLRUList()
+	cache.table[entry.cacheKey] = nil
 	delete(cache.table, entry.cacheKey) // Key evicted
 	return entry, nil
 }
@@ -186,8 +238,9 @@ func (cache *CacheDriver) allocateEntry(cacheKey string,
 }
 
 // RetrieveFromCacheOrCompute Search Request in the cache. If the request is already computed, then it
-// immediately return the cached entry. If the request is the first, then it blocks until the result is
-// ready. If the request is not the first but the result is not still ready, the it blocks until the result is ready
+// immediately returns the cached entry. If the request is the first, then it blocks until the result is
+// ready. If the request is not the first but the result is not still ready, then it blocks
+// until the result is ready
 func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	other ...interface{}) (interface{}, *RequestError) {
 
@@ -216,6 +269,8 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	currTime := time.Now()
 	cache.lock.Lock()
 
+	withCompression := cache.toCompress
+
 	entry, hit = cache.table[cacheKey]
 	if hit && currTime.Before(entry.expirationTime) {
 		cache.hitCount++
@@ -240,6 +295,25 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		}
 		entry.timestamp = currTime
 		entry.expirationTime = currTime.Add(cache.ttl)
+
+		if withCompression {
+			buf, err := lz4Decompress(entry.postProcessedResponse.([]byte))
+			if err != nil {
+				return nil, &RequestError{
+					Error: errors.New("cannot decompress stored message"),
+					Code:  Status5xx, // include 4xx and 5xx
+				}
+			}
+			result, err := cache.bytesToValue(buf)
+			if err != nil {
+				return nil, &RequestError{
+					Error: errors.New("cannot convert decompressed stored message"),
+					Code:  Status5xx, // include 4xx and 5xx
+				}
+			}
+			return result, nil
+		}
+
 		return entry.postProcessedResponse, nil
 	}
 
@@ -270,7 +344,21 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	} else {
 		entry.state = COMPUTED
 	}
-	entry.postProcessedResponse = retVal
+
+	if withCompression {
+		buf, err := cache.valueToBytes(retVal) // transforms retVal into a []byte ready for compression
+		if err != nil {
+			entry.state = FAILED5xx
+		}
+		lz4Buf, err := lz4Compress(buf)
+		if err != nil {
+			entry.state = FAILED5xx
+		}
+		entry.postProcessedResponse = lz4Buf // stores the compressed representation
+	} else {
+		entry.postProcessedResponse = retVal
+	}
+
 	entry.lock.Unlock()
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
@@ -280,6 +368,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 // remove entry from cache.Mutex must be taken
 func (cache *CacheDriver) remove(entry *CacheEntry) {
 	entry.selfDeleteFromLRUList()
+	cache.table[entry.cacheKey] = nil
 	delete(cache.table, entry.cacheKey)
 	cache.numEntries--
 }
