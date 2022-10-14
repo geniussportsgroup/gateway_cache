@@ -169,7 +169,7 @@ func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
 	bytesToValue func([]byte) (interface{}, error),
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
 	callUServices func(request, payload interface{},
-		other ...interface{}) (interface{}, *RequestError),
+	other ...interface{}) (interface{}, *RequestError),
 ) (cache *CacheDriver) {
 
 	cache = New(capacity, capFactor, ttl, toMapKey, preProcessRequest, callUServices)
@@ -331,6 +331,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	cache.lock.Unlock() // release global lock before to take the entry lock
 
 	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
+	defer entry.lock.Unlock()
 
 	var retVal interface{} = nil // Explicit initialization for understanding flow!
 	retVal, requestError = cache.callUServices(request, payload, other...)
@@ -359,7 +360,6 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		entry.postProcessedResponse = retVal
 	}
 
-	entry.lock.Unlock()
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
 	return retVal, requestError
