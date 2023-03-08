@@ -37,6 +37,7 @@ type CacheEntry struct {
 	prev                  *CacheEntry
 	next                  *CacheEntry
 	state                 int8 // AVAILABLE, COMPUTING, etc
+	err                   error
 }
 
 type RequestError struct {
@@ -169,7 +170,7 @@ func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
 	bytesToValue func([]byte) (interface{}, error),
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
 	callUServices func(request, payload interface{},
-	other ...interface{}) (interface{}, *RequestError),
+		other ...interface{}) (interface{}, *RequestError),
 ) (cache *CacheDriver) {
 
 	cache = New(capacity, capFactor, ttl, toMapKey, preProcessRequest, callUServices)
@@ -284,12 +285,12 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		defer entry.lock.Unlock()
 		if entry.state == FAILED5xx {
 			return nil, &RequestError{
-				Error: errors.New("uservice failed to preProcessRequest the match state (cached)"),
+				Error: entry.err,
 				Code:  Status5xxCached, // include 4xx and 5xx
 			}
 		} else if entry.state == FAILED4xx {
 			return nil, &RequestError{
-				Error: errors.New("uservice failed to preProcessRequest the match state (cached)"),
+				Error: entry.err,
 				Code:  Status4xxCached, // include 4xx and 5xx
 			}
 		}
@@ -342,6 +343,7 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		case requestError.Code == Status5xx || requestError.Code == Status5xxCached:
 			entry.state = FAILED5xx
 		}
+		entry.err = requestError.Error
 	} else {
 		entry.state = COMPUTED
 	}
