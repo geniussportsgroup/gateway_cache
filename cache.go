@@ -16,6 +16,7 @@ const (
 	COMPUTED
 	FAILED5xx
 	FAILED4xx
+	FAILED5XXMISSHANDLERERROR
 )
 
 const (
@@ -342,6 +343,8 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 			entry.state = FAILED4xx
 		case requestError.Code == Status5xx || requestError.Code == Status5xxCached:
 			entry.state = FAILED5xx
+		default:
+			entry.state = FAILED5XXMISSHANDLERERROR
 		}
 		entry.err = requestError.Error
 	} else {
