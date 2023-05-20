@@ -42,8 +42,9 @@ type CacheEntry struct {
 }
 
 type RequestError struct {
-	Error error
-	Code  int
+	Error    error
+	Code     int
+	UserInfo interface{}
 }
 
 type CacheDriver struct {
@@ -65,10 +66,14 @@ type CacheDriver struct {
 }
 
 func (cache *CacheDriver) MissCount() int {
+	cache.lock.Lock()
+	defer cache.lock.Unlock()
 	return cache.missCount
 }
 
 func (cache *CacheDriver) HitCount() int {
+	cache.lock.Lock()
+	defer cache.lock.Unlock()
 	return cache.hitCount
 }
 
@@ -85,7 +90,118 @@ func (cache *CacheDriver) ExtendedCapacity() int {
 }
 
 func (cache *CacheDriver) NumEntries() int {
+	cache.lock.Lock()
+	defer cache.lock.Unlock()
 	return cache.numEntries
+}
+
+// LazyRemove removes the entry with keyVal from the cache. It does not remove the entry immediately, but it marks it as	removed.
+func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
+
+	key, err := cache.toMapKey(keyVal)
+	if err != nil {
+		return err
+	}
+
+	cache.lock.Lock()
+
+	if entry, ok := cache.table[key]; ok {
+		cache.lock.Unlock()
+		entry.lock.Lock()
+		defer entry.lock.Unlock()
+
+		if entry.expirationTime.Before(time.Now()) {
+			return fmt.Errorf("entry expired")
+		}
+
+		if entry.state != COMPUTING && entry.state != AVAILABLE {
+			// In this way, when the entry is accessed again, it will be removed
+			entry.timestamp = time.Now()
+			entry.expirationTime = entry.timestamp
+			cache.lock.Lock()
+			cache.becomeLru(entry)
+			cache.lock.Unlock()
+			return nil
+		}
+
+		if entry.state == AVAILABLE {
+			return fmt.Errorf("entry is available state")
+		}
+
+		return fmt.Errorf("entry is computing state")
+	}
+
+	cache.lock.Unlock()
+
+	return nil
+}
+
+func (cache *CacheDriver) Touch(keyVal interface{}) error {
+
+	key, err := cache.toMapKey(keyVal)
+	if err != nil {
+		return err
+	}
+
+	cache.lock.Lock()
+
+	if entry, ok := cache.table[key]; ok {
+		cache.lock.Unlock()
+		entry.lock.Lock()
+		defer entry.lock.Unlock()
+
+		currentTime := time.Now()
+		if entry.expirationTime.Before(currentTime) {
+			return fmt.Errorf("entry expired")
+		}
+
+		if entry.state != COMPUTING && entry.state != AVAILABLE {
+			// In this way, when the entry is accessed again, it will be removed
+			entry.timestamp = currentTime
+			entry.expirationTime = entry.timestamp
+			cache.lock.Lock()
+			cache.becomeMru(entry)
+			cache.lock.Unlock()
+			return nil
+		}
+
+		if entry.state == AVAILABLE {
+			return fmt.Errorf("entry is available state")
+		}
+
+		return fmt.Errorf("entry is computing state")
+	}
+
+	cache.lock.Unlock()
+
+	return nil
+}
+
+// Contains returns true if the cache contains keyVal. It does not update the entry timestamp and consequently it does not change the eviction order.
+func (cache *CacheDriver) Contains(keyVal interface{}) (bool, error) {
+
+	key, err := cache.toMapKey(keyVal)
+	if err != nil {
+		return false, err
+	}
+
+	cache.lock.Lock()
+
+	if entry, ok := cache.table[key]; ok {
+		cache.lock.Unlock()
+		entry.lock.Lock()
+		defer entry.lock.Unlock()
+
+		if entry.state != AVAILABLE {
+			return true, nil
+		}
+
+		return false, nil
+	}
+
+	cache.lock.Unlock()
+
+	return false, nil
 }
 
 // New Creates a new cache. Parameters are:
@@ -192,15 +308,63 @@ func (cache *CacheDriver) insertAsMru(entry *CacheEntry) {
 	cache.head.next = entry
 }
 
+func (cache *CacheDriver) insertAsLru(entry *CacheEntry) {
+	entry.prev = cache.head.prev
+	entry.next = &cache.head
+	cache.head.prev.next = entry
+	cache.head.prev = entry
+}
+
 // Auto deletion of lru queue
 func (entry *CacheEntry) selfDeleteFromLRUList() {
 	entry.prev.next = entry.next
 	entry.next.prev = entry.prev
 }
 
+func (cache *CacheDriver) isLru(entry *CacheEntry) bool {
+	return entry.next == &cache.head
+}
+
+func (cache *CacheDriver) isMru(entry *CacheEntry) bool {
+	return entry.prev == &cache.head
+}
+
+func (cache *CacheDriver) isKeyLru(keyVal interface{}) (bool, error) {
+
+	key, err := cache.toMapKey(keyVal)
+	if err != nil {
+		return false, err
+	}
+
+	if entry, ok := cache.table[key]; ok {
+		return cache.isLru(entry), nil
+	}
+
+	return false, nil
+}
+
+func (cache *CacheDriver) isKeyMru(keyVal interface{}) (bool, error) {
+
+	key, err := cache.toMapKey(keyVal)
+	if err != nil {
+		return false, err
+	}
+
+	if entry, ok := cache.table[key]; ok {
+		return cache.isMru(entry), nil
+	}
+
+	return false, nil
+}
+
 func (cache *CacheDriver) becomeMru(entry *CacheEntry) {
 	entry.selfDeleteFromLRUList()
 	cache.insertAsMru(entry)
+}
+
+func (cache *CacheDriver) becomeLru(entry *CacheEntry) {
+	entry.selfDeleteFromLRUList()
+	cache.insertAsLru(entry)
 }
 
 // Rewove the last item in the list (lru); mutex must be taken. The entry becomes AVAILABLE
