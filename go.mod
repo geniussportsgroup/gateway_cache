@@ -1,6 +1,6 @@
 module github.com/geniussportsgroup/gateway_cache
 
-go 1.15
+go 1.18
 
 require (
 	github.com/frankban/quicktest v1.14.3 // indirect
