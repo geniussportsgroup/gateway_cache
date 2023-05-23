@@ -69,13 +69,13 @@ type CacheDriver[T any, K any] struct {
 	// callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
 }
 
-func (cache *CacheDriver) MissCount() int {
+func (cache *CacheDriver[T, K]) MissCount() int {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 	return cache.missCount
 }
 
-func (cache *CacheDriver) HitCount() int {
+func (cache *CacheDriver[T, K]) HitCount() int {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 	return cache.hitCount
@@ -93,16 +93,16 @@ func (cache *CacheDriver[T, K]) ExtendedCapacity() int {
 	return cache.extendedCapacity
 }
 
-func (cache *CacheDriver) NumEntries() int {
+func (cache *CacheDriver[T, K]) NumEntries() int {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 	return cache.numEntries
 }
 
 // LazyRemove removes the entry with keyVal from the cache. It does not remove the entry immediately, but it marks it as	removed.
-func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
+func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.proccessor.ToMapKey(keyVal)
 	if err != nil {
 		return err
 	}
@@ -140,9 +140,9 @@ func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
 	return nil
 }
 
-func (cache *CacheDriver) Touch(keyVal interface{}) error {
+func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.proccessor.ToMapKey(keyVal)
 	if err != nil {
 		return err
 	}
@@ -182,9 +182,9 @@ func (cache *CacheDriver) Touch(keyVal interface{}) error {
 }
 
 // Contains returns true if the cache contains keyVal. It does not update the entry timestamp and consequently it does not change the eviction order.
-func (cache *CacheDriver) Contains(keyVal interface{}) (bool, error) {
+func (cache *CacheDriver[T, K]) Contains(keyVal T) (bool, error) {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.proccessor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -311,7 +311,7 @@ func (cache *CacheDriver[T, K]) insertAsMru(entry *CacheEntry[K]) {
 	cache.head.next = entry
 }
 
-func (cache *CacheDriver) insertAsLru(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) insertAsLru(entry *CacheEntry[K]) {
 	entry.prev = cache.head.prev
 	entry.next = &cache.head
 	cache.head.prev.next = entry
@@ -324,17 +324,17 @@ func (entry *CacheEntry[T]) selfDeleteFromLRUList() {
 	entry.next.prev = entry.prev
 }
 
-func (cache *CacheDriver) isLru(entry *CacheEntry) bool {
+func (cache *CacheDriver[T, K]) isLru(entry *CacheEntry[K]) bool {
 	return entry.next == &cache.head
 }
 
-func (cache *CacheDriver) isMru(entry *CacheEntry) bool {
+func (cache *CacheDriver[T, K]) isMru(entry *CacheEntry[K]) bool {
 	return entry.prev == &cache.head
 }
 
-func (cache *CacheDriver) isKeyLru(keyVal interface{}) (bool, error) {
+func (cache *CacheDriver[T, K]) isKeyLru(keyVal T) (bool, error) {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.proccessor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -346,9 +346,9 @@ func (cache *CacheDriver) isKeyLru(keyVal interface{}) (bool, error) {
 	return false, nil
 }
 
-func (cache *CacheDriver) isKeyMru(keyVal interface{}) (bool, error) {
+func (cache *CacheDriver[T, K]) isKeyMru(keyVal T) (bool, error) {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.proccessor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -361,12 +361,12 @@ func (cache *CacheDriver) isKeyMru(keyVal interface{}) (bool, error) {
 }
 
 // func (cache *CacheDriver[T, K]) becomeMru(entry *CacheEntry[K]) {
-func (cache *CacheDriver) becomeMru(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) becomeMru(entry *CacheEntry[K]) {
 	entry.selfDeleteFromLRUList()
 	cache.insertAsMru(entry)
 }
 
-func (cache *CacheDriver) becomeLru(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) becomeLru(entry *CacheEntry[K]) {
 	entry.selfDeleteFromLRUList()
 	cache.insertAsLru(entry)
 }
