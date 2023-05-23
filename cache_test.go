@@ -574,3 +574,76 @@ func TestConcurrencyAndCompress(t *testing.T) {
 		wg.Wait()
 	}
 }
+
+func TestCacheDriver_LazyRemove(t *testing.T) {
+
+	cache, tbl := createCacheWithCapEntriesInside()
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
+
+	var lastRequest *RequestEntry
+	for i := 0; i < 100; i++ {
+		i := rand.Intn(N)
+		req := requests[i]
+		lastRequest = req
+		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		isMru, err := cache.isKeyMru(req)
+		assert.Nil(t, err)
+		assert.True(t, isMru)
+	}
+
+	err := cache.LazyRemove(lastRequest)
+	assert.Nil(t, err)
+	assert.False(t, cache.has(lastRequest))
+}
+
+func TestCacheDriver_Contains(t *testing.T) {
+
+	cache, tbl := createCacheWithCapEntriesInside()
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
+
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+	}
+
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		ok, err := cache.Contains(req)
+		assert.Nil(t, err)
+		assert.True(t, ok)
+	}
+}
+
+func TestCacheDriver_Touch(t *testing.T) {
+
+	cache, tbl := createCacheWithCapEntriesInside()
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
+
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+	}
+
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		err := cache.Touch(req)
+		assert.Nil(t, err)
+
+		mru, err := cache.isKeyMru(req)
+
+		assert.Nil(t, err)
+		assert.True(t, mru)
+	}
+}
