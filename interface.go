@@ -35,7 +35,7 @@ type CompressorI interface {
 //go:generate mockery --name TransformerI --with-expecter=true --filename=transformer_mock.go --inpackage
 type TransformerI[T any] interface {
 	BytesToValue([]byte) (T, error)
-	ValueToBytes(any) ([]byte, error)
+	ValueToBytes(T) ([]byte, error)
 }
 type DefaultTransformer[T any] struct{}
 
@@ -48,7 +48,7 @@ func (_ *DefaultTransformer[T]) BytesToValue(in []byte) (T, error) {
 	return out, nil
 }
 
-func (_ *DefaultTransformer[T]) ValueToBytes(in any) ([]byte, error) {
+func (_ *DefaultTransformer[T]) ValueToBytes(in T) ([]byte, error) {
 
 	return json.Marshal(in)
 }

@@ -414,7 +414,12 @@ func TestConcurrency(t *testing.T) {
 	const NumRepeatedCalls = 50
 
 	myProccessor := &MyProccessor{}
-	cache := New[*RequestEntry, []byte](SuperCap, .3, 30*time.Second, myProccessor)
+	cache := New[*RequestEntry, []byte](
+		SuperCap,
+		.3,
+		30*time.Second,
+		myProccessor,
+	)
 
 	tbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -446,14 +451,14 @@ func TestConcurrency(t *testing.T) {
 				// now we simulate the avalanche
 				for j := 0; j < NumRepeatedCalls; j++ {
 
-					go func() {
+					go func(req *RequestEntry) {
 						_, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
 
 						// var response Response
 						// err := json.Unmarshal(b.([]byte), &response)
 						// assert.Nil(t, err)
-					}()
+					}(req)
 
 				}
 
@@ -511,9 +516,11 @@ func TestConcurrencyAndCompress(t *testing.T) {
 				// now we simulate the avalanche
 				for j := 0; j < NumRepeatedCalls; j++ {
 
-					go func(request *RequestEntry) {
+					go func(req *RequestEntry) {
+						// response, requestError := cache.RetrieveFromCacheOrCompute(req)
 						_, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
+						// fmt.Printf("response: %v\n", response)
 
 						// ref := response.(*Response)
 						// assert.Equal(t, ref.Uresponse.Urequest.Request.N, request.N)

@@ -470,7 +470,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *Reque
 					Code:  Status5xx, // include 4xx and 5xx
 				}
 			}
-			// result, err := cache.bytesToValue(buf)
+
 			result, err := cache.transformer.BytesToValue(buf)
 			if err != nil {
 				return zeroK, &RequestError{
