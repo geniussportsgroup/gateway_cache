@@ -465,64 +465,70 @@ func TestConcurrency(t *testing.T) {
 	}
 }
 
-// func TestConcurrencyAndCompress(t *testing.T) {
+func TestConcurrencyAndCompress(t *testing.T) {
 
-// 	const ConcurrencyLevel = 10
-// 	const SuperCap = 1019
-// 	const NumRepeatedCalls = 20
+	const ConcurrencyLevel = 10
+	const SuperCap = 1019
+	const NumRepeatedCalls = 20
 
-// 	cache := NewWithCompression(SuperCap, .3, 30*time.Second, toKey, toBytes, toVal,
-// 		preProcessRequest, callServicesWithCompression)
+	myProccessor := &MyProccessor{}
+	defaultTransformer := &DefaultTransformer[[]byte]{}
+	cache := NewWithCompression[*RequestEntry, []byte](
+		SuperCap,
+		.3,
+		30*time.Second,
+		myProccessor,
+		defaultTransformer,
+	)
 
-// 	tbl := make(map[*RequestEntry]bool)
-// 	for i := 0; i < Capacity; i++ {
-// 		request := &RequestEntry{
-// 			N:    i + 10,
-// 			Time: time.Now(),
-// 		}
+	tbl := make(map[*RequestEntry]bool)
+	for i := 0; i < Capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
 
-// 		str := strconv.Itoa(i)
-// 		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
-// 		tbl[request] = true
-// 	}
+		_, _ = cache.RetrieveFromCacheOrCompute(request)
+		tbl[request] = true
+	}
 
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	for i := 0; i < 1e3; i++ {
-// 		wg := sync.WaitGroup{}
-// 		wg.Add(ConcurrencyLevel)
-// 		for k := 0; k < ConcurrencyLevel; k++ {
+	for i := 0; i < 1e3; i++ {
+		wg := sync.WaitGroup{}
+		wg.Add(ConcurrencyLevel)
+		for k := 0; k < ConcurrencyLevel; k++ {
 
-// 			go func() { // goroutine emulates an avalanche of repeated requests
+			go func() { // goroutine emulates an avalanche of repeated requests
 
-// 				idx := rand.Intn(N) // choose request randomly
-// 				req := requests[idx]
+				idx := rand.Intn(N) // choose request randomly
+				req := requests[idx]
 
-// 				// now we simulate the avalanche
-// 				for j := 0; j < NumRepeatedCalls; j++ {
+				// now we simulate the avalanche
+				for j := 0; j < NumRepeatedCalls; j++ {
 
-// 					go func(request *RequestEntry) {
-// 						response, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 						assert.Nil(t, requestError)
+					go func(request *RequestEntry) {
+						_, requestError := cache.RetrieveFromCacheOrCompute(req)
+						assert.Nil(t, requestError)
 
-// 						ref := response.(*Response)
-// 						assert.Equal(t, ref.Uresponse.Urequest.Request.N, request.N)
-// 						assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, request.PutValue)
-// 						assert.Equal(t, ref.Poem, keats)
-// 					}(req)
-// 				}
+						// ref := response.(*Response)
+						// assert.Equal(t, ref.Uresponse.Urequest.Request.N, request.N)
+						// assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, request.PutValue)
+						// assert.Equal(t, ref.Poem, keats)
+					}(req)
+				}
 
-// 				wg.Done()
-// 			}()
+				wg.Done()
+			}()
 
-// 		}
-// 		wg.Wait()
-// 	}
-// }
+		}
+		wg.Wait()
+	}
+}
 
 // func TestCacheDriver_LazyRemove(t *testing.T) {
 
