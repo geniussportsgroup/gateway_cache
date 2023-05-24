@@ -376,23 +376,32 @@ func TestCacheDriver_Clean(t *testing.T) {
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	cache, tbl := createCacheWithCapEntriesInside(
-		2,
-		proccessor,
-	)
-	N := len(tbl)
+	// proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	processor := &MyProccessor{}
+	cache := New[*RequestEntry, []byte](3, .4, TTL, processor)
+
+	requestTbl := make(map[*RequestEntry]bool)
+	for i := 0; i < Capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
+		cache.RetrieveFromCacheOrCompute(request)
+		requestTbl[request] = true
+	}
+	// 	1,
+	// 	proccessor,
+	// )
+	N := len(requestTbl)
 	requests := make([]*RequestEntry, 0, N)
-	for req := range tbl {
+	for req := range requestTbl {
 		requests = append(requests, req)
 	}
 
 	// some random touches
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 1000000; i++ {
 		i := rand.Intn(N)
 		req := requests[i]
-		s, _ := json.Marshal(req)
-		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
 		_, err := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, err)
 	}
