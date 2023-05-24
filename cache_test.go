@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -170,7 +171,7 @@ func createCompressedCacheWithCapEntriesInside(
 			N:    i + 10,
 			Time: time.Now(),
 		}
-		insertEntry[*RequestEntry](cache, proccessor, request)
+		insertEntry(cache, proccessor, request)
 		requestTbl[request] = true
 	}
 
@@ -378,7 +379,7 @@ func TestCacheDriver_Clean(t *testing.T) {
 func TestCacheDriver_HitCost(t *testing.T) {
 	// proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
 	processor := &MyProccessor{}
-	cache := New[*RequestEntry, []byte](3, .4, TTL, processor)
+	cache := New[*RequestEntry, []byte](Capacity, .4, TTL, processor)
 
 	requestTbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -404,69 +405,65 @@ func TestCacheDriver_HitCost(t *testing.T) {
 		_, err := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, err)
 	}
-	// for i := 0; i < 1000000; i++ {
-	// 	req := requests[0]
-	// 	_, err := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-	// }
 }
 
-// func TestConcurrency(t *testing.T) {
+func TestConcurrency(t *testing.T) {
 
-// 	const ConcurrencyLevel = 20
-// 	const SuperCap = 3037
-// 	const NumRepeatedCalls = 50
+	const ConcurrencyLevel = 20
+	const SuperCap = 3037
+	const NumRepeatedCalls = 50
 
-// 	cache := New(SuperCap, .3, 30*time.Second, toKey, preProcessRequest, callServices)
+	myProccessor := &MyProccessor{}
+	cache := New[*RequestEntry, []byte](SuperCap, .3, 30*time.Second, myProccessor)
 
-// 	tbl := make(map[*RequestEntry]bool)
-// 	for i := 0; i < Capacity; i++ {
-// 		request := &RequestEntry{
-// 			N:    i + 10,
-// 			Time: time.Now(),
-// 		}
+	tbl := make(map[*RequestEntry]bool)
+	for i := 0; i < Capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
 
-// 		str := strconv.Itoa(i)
-// 		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
-// 		tbl[request] = true
-// 	}
+		_, _ = cache.RetrieveFromCacheOrCompute(request)
+		tbl[request] = true
+	}
 
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	for i := 0; i < 1e4; i++ {
-// 		wg := sync.WaitGroup{}
-// 		wg.Add(ConcurrencyLevel)
-// 		for k := 0; k < ConcurrencyLevel; k++ {
+	for i := 0; i < 1e4; i++ {
+		wg := sync.WaitGroup{}
+		wg.Add(ConcurrencyLevel)
+		for k := 0; k < ConcurrencyLevel; k++ {
 
-// 			go func() { // goroutine emulates an avalanche of repeated requests
+			go func() { // goroutine emulates an avalanche of repeated requests
 
-// 				idx := rand.Intn(N) // choose request randomly
-// 				req := requests[idx]
+				idx := rand.Intn(N) // choose request randomly
+				req := requests[idx]
 
-// 				// now we simulate the avalanche
-// 				for j := 0; j < NumRepeatedCalls; j++ {
+				// now we simulate the avalanche
+				for j := 0; j < NumRepeatedCalls; j++ {
 
-// 					go func() {
-// 						b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 						assert.Nil(t, requestError)
+					go func() {
+						_, requestError := cache.RetrieveFromCacheOrCompute(req)
+						assert.Nil(t, requestError)
 
-// 						var response Response
-// 						err := json.Unmarshal(b.([]byte), &response)
-// 						assert.Nil(t, err)
-// 					}()
+						// var response Response
+						// err := json.Unmarshal(b.([]byte), &response)
+						// assert.Nil(t, err)
+					}()
 
-// 				}
+				}
 
-// 				wg.Done()
-// 			}()
+				wg.Done()
+			}()
 
-// 		}
-// 		wg.Wait()
-// 	}
-// }
+		}
+		wg.Wait()
+	}
+}
 
 // func TestConcurrencyAndCompress(t *testing.T) {
 
