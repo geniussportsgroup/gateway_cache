@@ -29,16 +29,17 @@ const (
 
 // CacheEntry Every cache entry has this information
 type CacheEntry[T any] struct {
-	cacheKey              string     // key stringficated; needed for removal operation
-	lock                  sync.Mutex // lock for repeated requests
-	cond                  *sync.Cond // used in conjunction with the lock for repeated request until result is ready
-	postProcessedResponse T
-	timestamp             time.Time // Last time accessed
-	expirationTime        time.Time
-	prev                  *CacheEntry[T]
-	next                  *CacheEntry[T]
-	state                 int8 // AVAILABLE, COMPUTING, etc
-	err                   error
+	cacheKey                        string     // key stringficated; needed for removal operation
+	lock                            sync.Mutex // lock for repeated requests
+	cond                            *sync.Cond // used in conjunction with the lock for repeated request until result is ready
+	postProcessedResponse           T
+	postProcessedResponseCompressed []byte
+	timestamp                       time.Time // Last time accessed
+	expirationTime                  time.Time
+	prev                            *CacheEntry[T]
+	next                            *CacheEntry[T]
+	state                           int8 // AVAILABLE, COMPUTING, etc
+	err                             error
 }
 
 type RequestError struct {
@@ -61,7 +62,8 @@ type CacheDriver[T any, K any] struct {
 	numEntries       int
 	toCompress       bool
 	proccessor       ProccessorI[T, K]
-	compressor       CompressorI[K]
+	transformer      TransformerI[K]
+	compressor       CompressorI
 	// toMapKey          func(key interface{}) (string, error)
 	// valueToBytes      func(value interface{}) ([]byte, error)
 	// bytesToValue      func([]byte) (interface{}, error)
@@ -162,7 +164,7 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
 			// In this way, when the entry is accessed again, it will be removed
 			entry.timestamp = currentTime
-			entry.expirationTime = entry.timestamp
+			entry.expirationTime = currentTime.Add(cache.ttl)
 			cache.lock.Lock()
 			cache.becomeMru(entry)
 			cache.lock.Unlock()
@@ -246,6 +248,7 @@ func New[T any, K any](
 		ttl:              ttl,
 		table:            make(map[string]*CacheEntry[K], int(extendedCapacity)),
 		proccessor:       proccessor,
+		compressor:       lz4Compressor{},
 		// toMapKey:          toMapKey,
 		// preProcessRequest: preProcessRequest,
 		// callUServices:     callUServices,
@@ -291,13 +294,13 @@ func NewWithCompression[T any, K any](
 	capFactor float64,
 	ttl time.Duration,
 	proccessor ProccessorI[T, K],
-	compressor CompressorI[K],
+	compressor TransformerI[K],
 ) (cache *CacheDriver[T, K]) {
 
 	cache = New(capacity, capFactor, ttl, proccessor)
 	if cache != nil {
 		cache.toCompress = true
-		cache.compressor = compressor
+		cache.transformer = compressor
 	}
 
 	return cache
@@ -333,7 +336,6 @@ func (cache *CacheDriver[T, K]) isMru(entry *CacheEntry[K]) bool {
 }
 
 func (cache *CacheDriver[T, K]) isKeyLru(keyVal T) (bool, error) {
-
 	key, err := cache.proccessor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
@@ -461,14 +463,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *Reque
 
 		if withCompression {
 
-			data, err := cache.compressor.ValueToBytes(entry.postProcessedResponse)
-			if err != nil {
-				return zeroK, &RequestError{
-					Error: errors.New("cannot convert stored message"),
-					Code:  Status5xx, // include 4xx and 5xx
-				}
-			}
-			buf, err := lz4Decompress(data)
+			buf, err := cache.compressor.Decompress(entry.postProcessedResponseCompressed)
 			if err != nil {
 				return zeroK, &RequestError{
 					Error: errors.New("cannot decompress stored message"),
@@ -476,7 +471,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *Reque
 				}
 			}
 			// result, err := cache.bytesToValue(buf)
-			result, err := cache.compressor.BytesToValue(buf)
+			result, err := cache.transformer.BytesToValue(buf)
 			if err != nil {
 				return zeroK, &RequestError{
 					Error: errors.New("cannot convert decompressed stored message"),
@@ -524,23 +519,20 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *Reque
 
 	if withCompression {
 		// buf, err := cache.valueToBytes(retVal) // transforms retVal into a []byte ready for compression
-		buf, err := cache.compressor.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
+		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
 			entry.state = FAILED5xx
 		}
-		lz4Buf, err := lz4Compress(buf)
+		lz4Buf, err := cache.compressor.Compress(buf)
 		if err != nil {
 			entry.state = FAILED5xx
+			entry.postProcessedResponse = retVal
+		} else {
+			entry.postProcessedResponseCompressed = lz4Buf
 		}
 		// if you want to store the compressed representation
 		// your type should be a []byte, to validate it we use the interface{}(lz4Buf).(K)
-		if resp, ok := interface{}(lz4Buf).(K); !ok {
-			entry.state = FAILED5xx
-		} else {
-			entry.postProcessedResponse = resp // stores the compressed representation
-		}
-	} else {
-		entry.postProcessedResponse = retVal
+
 	}
 
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
