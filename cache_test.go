@@ -54,6 +54,7 @@ func (p *MyProccessor) CallUServices(request *RequestEntry) ([]byte, *RequestErr
 	uresponse := &UResponse{Urequest: urequest}
 	response := &Response{
 		Uresponse: uresponse,
+		Poem:      keats,
 	}
 	b, err := json.Marshal(*response)
 	if err != nil {
@@ -517,15 +518,14 @@ func TestConcurrencyAndCompress(t *testing.T) {
 				for j := 0; j < NumRepeatedCalls; j++ {
 
 					go func(req *RequestEntry) {
-						// response, requestError := cache.RetrieveFromCacheOrCompute(req)
-						_, requestError := cache.RetrieveFromCacheOrCompute(req)
+						response, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
-						// fmt.Printf("response: %v\n", response)
 
-						// ref := response.(*Response)
-						// assert.Equal(t, ref.Uresponse.Urequest.Request.N, request.N)
-						// assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, request.PutValue)
-						// assert.Equal(t, ref.Poem, keats)
+						ref := &Response{}
+						err := json.Unmarshal(response, &ref)
+						assert.Nil(t, err)
+						assert.Equal(t, ref.Uresponse.Urequest.Request.N, req.N)
+						assert.Equal(t, ref.Poem, keats)
 					}(req)
 				}
 
@@ -537,75 +537,92 @@ func TestConcurrencyAndCompress(t *testing.T) {
 	}
 }
 
-// func TestCacheDriver_LazyRemove(t *testing.T) {
+func TestCacheDriver_LazyRemove(t *testing.T) {
 
-// 	cache, tbl := createCacheWithCapEntriesInside()
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		proccessor,
+	)
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	var lastRequest *RequestEntry
-// 	for i := 0; i < 100; i++ {
-// 		i := rand.Intn(N)
-// 		req := requests[i]
-// 		lastRequest = req
-// 		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 		isMru, err := cache.isKeyMru(req)
-// 		assert.Nil(t, err)
-// 		assert.True(t, isMru)
-// 	}
+	var lastRequest *RequestEntry
+	for i := 0; i < 100; i++ {
+		i := rand.Intn(N)
+		req := requests[i]
+		lastRequest = req
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
+		isMru, err := cache.isKeyMru(req)
+		assert.Nil(t, err)
+		assert.True(t, isMru)
+	}
 
-// 	err := cache.LazyRemove(lastRequest)
-// 	assert.Nil(t, err)
-// 	assert.False(t, cache.has(lastRequest))
-// }
+	s, _ := json.Marshal(lastRequest)
+	proccessor.EXPECT().ToMapKey(lastRequest).Return(string(s), nil).Times(2)
+	err := cache.LazyRemove(lastRequest)
+	assert.Nil(t, err)
+	assert.False(t, cache.has(lastRequest))
+}
 
-// func TestCacheDriver_Contains(t *testing.T) {
+func TestCacheDriver_Contains(t *testing.T) {
 
-// 	cache, tbl := createCacheWithCapEntriesInside()
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		proccessor,
+	)
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	for i := 0; i < N; i++ {
-// 		req := requests[i]
-// 		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 	}
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
+	}
 
-// 	for i := 0; i < N; i++ {
-// 		req := requests[i]
-// 		ok, err := cache.Contains(req)
-// 		assert.Nil(t, err)
-// 		assert.True(t, ok)
-// 	}
-// }
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		ok, err := cache.Contains(req)
+		assert.Nil(t, err)
+		assert.True(t, ok)
+	}
+}
 
-// func TestCacheDriver_Touch(t *testing.T) {
+func TestCacheDriver_Touch(t *testing.T) {
 
-// 	cache, tbl := createCacheWithCapEntriesInside()
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		proccessor,
+	)
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	for i := 0; i < N; i++ {
-// 		req := requests[i]
-// 		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 	}
+	for i := 0; i < N; i++ {
+		req := requests[i]
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
+		err := cache.Touch(req)
+		assert.Nil(t, err)
 
-// 	for i := 0; i < N; i++ {
-// 		req := requests[i]
-// 		err := cache.Touch(req)
-// 		assert.Nil(t, err)
+		mru, err := cache.isKeyMru(req)
 
-// 		mru, err := cache.isKeyMru(req)
-
-// 		assert.Nil(t, err)
-// 		assert.True(t, mru)
-// 	}
-// }
+		assert.Nil(t, err)
+		assert.True(t, mru)
+	}
+}

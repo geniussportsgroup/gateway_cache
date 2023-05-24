@@ -165,6 +165,7 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 			// In this way, when the entry is accessed again, it will be removed
 			entry.timestamp = currentTime
 			entry.expirationTime = currentTime.Add(cache.ttl)
+			// entry.expirationTime = entry.timestamp
 			cache.lock.Lock()
 			cache.becomeMru(entry)
 			cache.lock.Unlock()
@@ -355,7 +356,7 @@ func (cache *CacheDriver[T, K]) isKeyMru(keyVal T) (bool, error) {
 		return false, err
 	}
 
-	if entry, ok := cache.table[key]; ok {
+	if entry, ok := cache.table[key]; ok && entry.expirationTime.After(time.Now()) {
 		return cache.isMru(entry), nil
 	}
 
