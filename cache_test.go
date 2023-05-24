@@ -307,115 +307,100 @@ func TestCompressRandomTouches(t *testing.T) {
 	}
 }
 
-// func TestCompressRandomTouches(t *testing.T) {
-// 	cache, tbl := createCompressedCacheWithCapEntriesInside()
+func TestCacheDriver_CacheState(t *testing.T) {
 
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 	}
+	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		2,
+		proccessor,
+	)
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	for i := 0; i < 1e6; i++ {
-// 		i := rand.Intn(N)
-// 		req := requests[i]
-// 		response, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 		assert.Nil(t, requestError)
+	// some random touches
+	for i := 0; i < 100; i++ {
+		i := rand.Intn(N)
+		req := requests[i]
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
+	}
 
-// 		compressedValue := cache.getMru().postProcessedResponse
-// 		decompressedValue, _ := lz4Decompress(compressedValue.([]byte))
-// 		value := &Response{
-// 			Uresponse: &UResponse{Urequest: &URequest{
-// 				Request: &RequestEntry{
-// 					N:        0,
-// 					Time:     time.Time{},
-// 					PutValue: "",
-// 				},
-// 				PutValue: "",
-// 			}},
-// 			Poem: "",
-// 		}
-// 		err := json.Unmarshal(decompressedValue, value)
-// 		assert.Nil(t, err)
-// 		ref := response.(*Response)
-// 		assert.Equal(t, ref.Poem, value.Poem)
-// 		assert.Equal(t, ref.Uresponse.Urequest.Request.N, value.Uresponse.Urequest.Request.N)
-// 		assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, value.Uresponse.Urequest.Request.PutValue)
-// 		assert.Equal(t, ref.Uresponse.Urequest.PutValue, value.Uresponse.Urequest.PutValue)
-// 	}
-// }
+	state, err := cache.GetState()
+	assert.Nil(t, err)
+	assert.NotNil(t, state)
 
-// func TestCacheDriver_CacheState(t *testing.T) {
+}
 
-// 	cache, tbl := createCacheWithCapEntriesInside()
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+func TestCacheDriver_Clean(t *testing.T) {
 
-// 	// some random touches
-// 	for i := 0; i < 100; i++ {
-// 		i := rand.Intn(N)
-// 		req := requests[i]
-// 		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 	}
+	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		proccessor,
+	)
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	state, err := cache.GetState()
-// 	assert.Nil(t, err)
-// 	assert.NotNil(t, state)
+	// some random touches
+	for i := 0; i < 100; i++ {
+		i := rand.Intn(N)
+		req := requests[i]
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
+	}
 
-// 	fmt.Print(state)
-// }
+	err := cache.Clean()
+	assert.Nil(t, err)
+	assert.Equal(t, 0, cache.missCount)
+	assert.Equal(t, 0, cache.hitCount)
+	assert.Equal(t, 0, cache.numEntries)
+	assert.Equal(t, Capacity, cache.capacity)
+	assert.Equal(t, TTL, cache.ttl)
 
-// func TestCacheDriver_Clean(t *testing.T) {
+	state, _ := cache.GetState()
 
-// 	cache, tbl := createCacheWithCapEntriesInside()
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
+	var s CacheState
+	err = json.Unmarshal([]byte(state), &s)
 
-// 	// some random touches
-// 	for i := 0; i < 100; i++ {
-// 		i := rand.Intn(N)
-// 		req := requests[i]
-// 		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 	}
+	assert.Equal(t, 0, s.NumEntries)
+	assert.Equal(t, 0, s.HitCount)
+	assert.Equal(t, 0, s.MissCount)
+}
 
-// 	err := cache.Clean()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, 0, cache.missCount)
-// 	assert.Equal(t, 0, cache.hitCount)
-// 	assert.Equal(t, 0, cache.numEntries)
-// 	assert.Equal(t, Capacity, cache.capacity)
-// 	assert.Equal(t, TTL, cache.ttl)
+func TestCacheDriver_HitCost(t *testing.T) {
+	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		2,
+		proccessor,
+	)
+	N := len(tbl)
+	requests := make([]*RequestEntry, 0, N)
+	for req := range tbl {
+		requests = append(requests, req)
+	}
 
-// 	state, _ := cache.GetState()
-
-// 	var s CacheState
-// 	err = json.Unmarshal([]byte(state), &s)
-
-// 	assert.Equal(t, 0, s.NumEntries)
-// 	assert.Equal(t, 0, s.HitCount)
-// 	assert.Equal(t, 0, s.MissCount)
-// }
-
-// func TestCacheDriver_HitCost(t *testing.T) {
-
-// 	cache, tbl := createCacheWithCapEntriesInside()
-// 	N := len(tbl)
-// 	requests := make([]*RequestEntry, 0, N)
-// 	for req := range tbl {
-// 		requests = append(requests, req)
-// 	}
-
-// 	for i := 0; i < 1000000; i++ {
-// 		req := requests[0]
-// 		_, err := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-// 		assert.Nil(t, err)
-// 	}
-// }
+	// some random touches
+	for i := 0; i < 100000; i++ {
+		i := rand.Intn(N)
+		req := requests[i]
+		s, _ := json.Marshal(req)
+		proccessor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, err := cache.RetrieveFromCacheOrCompute(req)
+		assert.Nil(t, err)
+	}
+	// for i := 0; i < 1000000; i++ {
+	// 	req := requests[0]
+	// 	_, err := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+	// }
+}
 
 // func TestConcurrency(t *testing.T) {
 
