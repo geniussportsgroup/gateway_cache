@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 var keats string = `A thing of beauty is a joy for ever:\n
@@ -646,3 +647,37 @@ func TestCacheDriver_Touch(t *testing.T) {
 		assert.True(t, mru)
 	}
 }
+
+type Adder struct {
+	num1, num2 int
+}
+
+func ToMapKey(request interface{}) (string, error) {
+	adder := request.(Adder)
+	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
+}
+
+func CallUServices(request, _ interface{}, _ ...interface{}) (interface{}, *RequestError) {
+	adder := request.(Adder)
+	return adder.num1 + adder.num2, nil
+}
+
+var seed int64 = 39823823434
+
+func BenchmarkInsert(b *testing.B) {
+	cache := New(Capacity, 0.5, TTL, ToMapKey, nil, CallUServices)
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		num1 := rand.Intn(100)
+		num2 := rand.Intn(100)
+		adder := Adder{num1, num2}
+		_, _ = cache.RetrieveFromCacheOrCompute(adder)
+	}
+
+}
+
+//go test -bench=. -benchmem
+//goos: darwin
+//goarch: amd64
+//pkg: github.com/geniussportsgroup/gateway_cache
