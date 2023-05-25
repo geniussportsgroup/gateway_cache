@@ -159,7 +159,7 @@ func (cache *CacheDriver) Touch(keyVal interface{}) error {
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
 			// In this way, when the entry is accessed again, it will be removed
 			entry.timestamp = currentTime
-			entry.expirationTime = entry.timestamp
+			entry.expirationTime = currentTime.Add(cache.ttl)
 			cache.lock.Lock()
 			cache.becomeMru(entry)
 			cache.lock.Unlock()
@@ -220,7 +220,6 @@ func (cache *CacheDriver) Contains(keyVal interface{}) (bool, error) {
 //
 // callUService: is responsible for calling to the service and building a byte sequence corresponding to the
 // service response
-//
 func New(capacity int, capFactor float64, ttl time.Duration,
 	toMapKey func(key interface{}) (string, error),
 	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
@@ -281,7 +280,6 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 //
 // callUService: is responsible for calling to the service and building a byte sequence corresponding to the
 // service response
-//
 func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
 	toMapKey func(key interface{}) (string, error),
 	valueToBytes func(value interface{}) ([]byte, error),
@@ -651,7 +649,6 @@ func (cache *CacheDriver) clean() error {
 // state.
 //
 // Uses internal lock
-//
 func (cache *CacheDriver) Clean() error {
 
 	cache.lock.Lock()
