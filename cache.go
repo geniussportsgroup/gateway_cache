@@ -500,10 +500,10 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, processor 
 	// retVal, requestError = cache.callUServices(request, payload, other...)
 	retVal, requestError := processor.CallUServices(request)
 	if requestError != nil {
-		switch {
-		case requestError.Code == Status4xx || requestError.Code == Status4xxCached:
+		switch requestError.Code {
+		case Status4xx, Status4xxCached:
 			entry.state = FAILED4xx
-		case requestError.Code == Status5xx || requestError.Code == Status5xxCached:
+		case Status5xx, Status5xxCached:
 			entry.state = FAILED5xx
 		default:
 			entry.state = FAILED5XXMISSHANDLERERROR
