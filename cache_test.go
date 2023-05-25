@@ -664,17 +664,24 @@ func CallUServices(request, _ interface{}, _ ...interface{}) (interface{}, *Requ
 
 var seed int64 = 39823823434
 
-func BenchmarkInsert(b *testing.B) {
+func BenchmarkInsertStatic(b *testing.B) {
+	benchInsert(b, seed)
+}
+
+func BenchmarkInsertDynamic(b *testing.B) {
+	benchInsert(b, time.Now().Unix())
+}
+
+func benchInsert(b *testing.B, seed int64) {
 	cache := New(Capacity, 0.5, TTL, ToMapKey, nil, CallUServices)
 	rand.Seed(seed)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		num1 := rand.Intn(100)
-		num2 := rand.Intn(100)
+		num1 := rand.Int()
+		num2 := rand.Int()
 		adder := Adder{num1, num2}
 		_, _ = cache.RetrieveFromCacheOrCompute(adder)
 	}
-
 }
 
 //go test -bench=. -benchmem
