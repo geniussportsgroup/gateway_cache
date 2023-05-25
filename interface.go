@@ -2,12 +2,14 @@ package gw_cache
 
 import (
 	"encoding/json"
+
+	"github.com/geniussportsgroup/gateway_cache/models"
 )
 
 // MapperI transfomrs the input to a string key
 // T represents the input type to get a value
 //
-//go:generate mockery --name MapperI --with-expecter=true --filename=mapper_mock.go --inpackage
+//go:generate mockery --name MapperI --with-expecter=true --filename=mapper_mock.go
 type MapperI[T any] interface {
 	ToMapKey(T) (string, error)
 }
@@ -19,9 +21,9 @@ type MapperI[T any] interface {
 // K represents the valueitself
 //
 
-//go:generate mockery --name ProccessorI --with-expecter=true --filename=proccessor_mock.go --inpackage
+//go:generate mockery --name ProccessorI --with-expecter=true --filename=proccessor_mock.go
 type ProccessorI[T, K any] interface {
-	CallUServices(T) (K, *RequestError) //we will leave the preprocess logic for this function
+	CallUServices(T) (K, *models.RequestError) //we will leave the preprocess logic for this function
 
 }
 
@@ -29,7 +31,7 @@ type ProccessorI[T, K any] interface {
 // Compress is used to compress the input
 // Decompress is used to decompress the input
 //
-//go:generate mockery --name CompressorI --with-expecter=true --filename=compressor_mock.go --inpackage
+//go:generate mockery --name CompressorI --with-expecter=true --filename=compressor_mock.go
 type CompressorI interface {
 	Compress([]byte) ([]byte, error)
 	Decompress([]byte) ([]byte, error)
@@ -40,7 +42,7 @@ type CompressorI interface {
 // ValueToBytes is used to convert the value to a byte array
 // T represents the value type
 //
-//go:generate mockery --name TransformerI --with-expecter=true --filename=transformer_mock.go --inpackage
+//go:generate mockery --name TransformerI --with-expecter=true --filename=transformer_mock.go
 type TransformerI[T any] interface {
 	BytesToValue([]byte) (T, error)
 	ValueToBytes(T) ([]byte, error)

@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geniussportsgroup/gateway_cache/mocks"
+
+	"github.com/geniussportsgroup/gateway_cache/models"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -43,7 +46,7 @@ func (p *MyProccessor) ToMapKey(entry *RequestEntry) (string, error) {
 	return string(b), nil
 }
 
-func (p *MyProccessor) CallUServices(request *RequestEntry) ([]byte, *RequestError) {
+func (p *MyProccessor) CallUServices(request *RequestEntry) ([]byte, *models.RequestError) {
 
 	entry := request
 	urequest := &URequest{
@@ -58,7 +61,7 @@ func (p *MyProccessor) CallUServices(request *RequestEntry) ([]byte, *RequestErr
 	}
 	b, err := json.Marshal(*response)
 	if err != nil {
-		return nil, &RequestError{
+		return nil, &models.RequestError{
 			Error: err,
 			Code:  Status5xx,
 		}
@@ -100,10 +103,10 @@ const TTL = 15 * time.Second
 
 func TestWithCompress(t *testing.T) {
 
-	transformer := NewMockTransformerI[any](t)
-	proccessor := NewMockProccessorI[any, any](t)
-	mapper := NewMockMapperI[any](t)
-	compressor := NewMockCompressorI(t)
+	transformer := mocks.NewTransformerI[any](t)
+	proccessor := mocks.NewProccessorI[any, any](t)
+	mapper := mocks.NewMapperI[any](t)
+	compressor := mocks.NewCompressorI(t)
 
 	mapper.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
 	proccessor.EXPECT().CallUServices(mock.Anything).Return(keats, nil).Times(1)
@@ -129,10 +132,10 @@ func TestWithCompress(t *testing.T) {
 
 func insertEntry[T any](
 	cache *CacheDriver[T, T],
-	proccessor *MockProccessorI[T, T],
-	mapper *MockMapperI[T],
+	proccessor *mocks.ProccessorI[T, T],
+	mapper *mocks.MapperI[T],
 	request T,
-) (T, *RequestError) {
+) (T, *models.RequestError) {
 	s, _ := json.Marshal(request)
 	mapper.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
 	proccessor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
@@ -142,8 +145,8 @@ func insertEntry[T any](
 
 func createCacheWithCapEntriesInside(
 	capacity int,
-	proccessor *MockProccessorI[*RequestEntry, *RequestEntry],
-	mapper *MockMapperI[*RequestEntry],
+	proccessor *mocks.ProccessorI[*RequestEntry, *RequestEntry],
+	mapper *mocks.MapperI[*RequestEntry],
 ) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
 	cache := New[*RequestEntry, *RequestEntry](capacity, .4, TTL, mapper)
@@ -163,8 +166,8 @@ func createCacheWithCapEntriesInside(
 
 func createCompressedCacheWithCapEntriesInside(
 	capacity int,
-	proccessor *MockProccessorI[*RequestEntry, *RequestEntry],
-	mapper *MockMapperI[*RequestEntry],
+	proccessor *mocks.ProccessorI[*RequestEntry, *RequestEntry],
+	mapper *mocks.MapperI[*RequestEntry],
 ) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
 	transformer := &DefaultTransformer[*RequestEntry]{}
@@ -185,8 +188,8 @@ func createCompressedCacheWithCapEntriesInside(
 
 func TestEvictions(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(Capacity, proccessor, mapper)
 
 	// now we insert Capacity new entries which should evict all the previously inserted ones
@@ -209,8 +212,8 @@ func TestEvictions(t *testing.T) {
 
 func TestCacheDriver_Has(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(Capacity, proccessor, mapper)
 
 	for req := range tbl {
@@ -222,8 +225,8 @@ func TestCacheDriver_Has(t *testing.T) {
 
 func TestLRUOrder(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, _ := createCacheWithCapEntriesInside(
 		Capacity,
 		proccessor,
@@ -242,8 +245,8 @@ func TestLRUOrder(t *testing.T) {
 func TestCacheDriver_testTTL(t *testing.T) {
 
 	ttl := 3 * time.Second
-	proccessor := NewMockProccessorI[any, any](t)
-	mapper := NewMockMapperI[any](t)
+	proccessor := mocks.NewProccessorI[any, any](t)
+	mapper := mocks.NewMapperI[any](t)
 	cache := New[any, any](Capacity, .4, ttl, mapper)
 
 	request := &RequestEntry{
@@ -263,8 +266,8 @@ func TestCacheDriver_testTTL(t *testing.T) {
 }
 
 func TestRandomTouches(t *testing.T) {
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		2,
 		proccessor,
@@ -292,8 +295,8 @@ func TestRandomTouches(t *testing.T) {
 }
 
 func TestCompressRandomTouches(t *testing.T) {
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCompressedCacheWithCapEntriesInside(
 		2,
 		proccessor,
@@ -324,8 +327,8 @@ func TestCompressRandomTouches(t *testing.T) {
 
 func TestCacheDriver_CacheState(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		2,
 		proccessor,
@@ -354,8 +357,8 @@ func TestCacheDriver_CacheState(t *testing.T) {
 
 func TestCacheDriver_Clean(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		proccessor,
@@ -395,7 +398,7 @@ func TestCacheDriver_Clean(t *testing.T) {
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {
-	// proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
+	// proccessor := NewProccessorI[*RequestEntry, *RequestEntry](t)
 	processor := &MyProccessor{}
 	cache := New[*RequestEntry, []byte](Capacity, .4, TTL, processor)
 
@@ -556,8 +559,8 @@ func TestConcurrencyAndCompress(t *testing.T) {
 
 func TestCacheDriver_LazyRemove(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		proccessor,
@@ -591,8 +594,8 @@ func TestCacheDriver_LazyRemove(t *testing.T) {
 
 func TestCacheDriver_Contains(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		proccessor,
@@ -623,8 +626,8 @@ func TestCacheDriver_Contains(t *testing.T) {
 
 func TestCacheDriver_Touch(t *testing.T) {
 
-	proccessor := NewMockProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := NewMockMapperI[*RequestEntry](t)
+	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
+	mapper := mocks.NewMapperI[*RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		proccessor,

@@ -7,6 +7,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/geniussportsgroup/gateway_cache/models"
 )
 
 // State that a cache entry could have
@@ -40,13 +42,6 @@ type CacheEntry[T any] struct {
 	next                            *CacheEntry[T]
 	state                           int8 // AVAILABLE, COMPUTING, etc
 	err                             error
-}
-
-type RequestError struct {
-	Error    error
-	Code     int
-	UserCode int
-	// TODO: add UserInfo as a kind of opaque data pointer. In that way, the user can return to the invoker any kind of additional data
 }
 
 // CacheDriver The cache itself T represents the request type and K the response type
@@ -415,15 +410,15 @@ func (cache *CacheDriver[T, K]) allocateEntry(
 // immediately returns the cached entry. If the request is the first, then it blocks until the result is
 // ready. If the request is not the first but the result is not still ready, then it blocks
 // until the result is ready
-func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor ProccessorI[T, K]) (K, *RequestError) {
+func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor ProccessorI[T, K]) (K, *models.RequestError) {
 
-	var requestError *RequestError
+	var requestError *models.RequestError
 	var zeroK K
 	payload := request
 
 	cacheKey, err := cache.mapper.ToMapKey(payload)
 	if err != nil {
-		return zeroK, &RequestError{
+		return zeroK, &models.RequestError{
 			Error: err,
 			Code:  Status4xx,
 		}
@@ -448,12 +443,12 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor
 		}
 		defer entry.lock.Unlock()
 		if entry.state == FAILED5xx {
-			return zeroK, &RequestError{
+			return zeroK, &models.RequestError{
 				Error: entry.err,
 				Code:  Status5xxCached, // include 4xx and 5xx
 			}
 		} else if entry.state == FAILED4xx {
-			return zeroK, &RequestError{
+			return zeroK, &models.RequestError{
 				Error: entry.err,
 				Code:  Status4xxCached, // include 4xx and 5xx
 			}
@@ -465,7 +460,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor
 
 			buf, err := cache.compressor.Decompress(entry.postProcessedResponseCompressed)
 			if err != nil {
-				return zeroK, &RequestError{
+				return zeroK, &models.RequestError{
 					Error: errors.New("cannot decompress stored message"),
 					Code:  Status5xx, // include 4xx and 5xx
 				}
@@ -473,7 +468,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor
 
 			result, err := cache.transformer.BytesToValue(buf)
 			if err != nil {
-				return zeroK, &RequestError{
+				return zeroK, &models.RequestError{
 					Error: errors.New("cannot convert decompressed stored message"),
 					Code:  Status5xx, // include 4xx and 5xx
 				}
