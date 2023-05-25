@@ -647,7 +647,7 @@ func (p *MyProcessor) CallUServices(adder Adder) (int, *models.RequestError) {
 	return adder.num1 + adder.num2, nil
 }
 
-var seed = time.Now().UnixNano()
+var seed int64 = 39823823434
 
 func BenchmarkInsert(b *testing.B) {
 	cache := New[Adder, int](Capacity, 0.5, TTL, &MyProcessor{})
