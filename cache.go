@@ -61,7 +61,7 @@ type CacheDriver[T any, K any] struct {
 	extendedCapacity int
 	numEntries       int
 	toCompress       bool
-	proccessor       ProccessorI[T, K]
+	mapper           MapperI[T]
 	transformer      TransformerI[K]
 	compressor       CompressorI
 	// toMapKey          func(key interface{}) (string, error)
@@ -104,7 +104,7 @@ func (cache *CacheDriver[T, K]) NumEntries() int {
 // LazyRemove removes the entry with keyVal from the cache. It does not remove the entry immediately, but it marks it as	removed.
 func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 
-	key, err := cache.proccessor.ToMapKey(keyVal)
+	key, err := cache.mapper.ToMapKey(keyVal)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 
 func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 
-	key, err := cache.proccessor.ToMapKey(keyVal)
+	key, err := cache.mapper.ToMapKey(keyVal)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,6 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 			// In this way, when the entry is accessed again, it will be removed
 			entry.timestamp = currentTime
 			entry.expirationTime = currentTime.Add(cache.ttl)
-			// entry.expirationTime = entry.timestamp
 			cache.lock.Lock()
 			cache.becomeMru(entry)
 			cache.lock.Unlock()
@@ -187,7 +186,7 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 // Contains returns true if the cache contains keyVal. It does not update the entry timestamp and consequently it does not change the eviction order.
 func (cache *CacheDriver[T, K]) Contains(keyVal T) (bool, error) {
 
-	key, err := cache.proccessor.ToMapKey(keyVal)
+	key, err := cache.mapper.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -230,7 +229,7 @@ func New[T any, K any](
 	capacity int,
 	capFactor float64,
 	ttl time.Duration,
-	proccessor ProccessorI[T, K],
+	mapper MapperI[T],
 
 ) *CacheDriver[T, K] {
 
@@ -248,7 +247,7 @@ func New[T any, K any](
 		numEntries:       0,
 		ttl:              ttl,
 		table:            make(map[string]*CacheEntry[K], int(extendedCapacity)),
-		proccessor:       proccessor,
+		mapper:           mapper,
 		compressor:       lz4Compressor{},
 		// toMapKey:          toMapKey,
 		// preProcessRequest: preProcessRequest,
@@ -294,11 +293,11 @@ func NewWithCompression[T any, K any](
 	capacity int,
 	capFactor float64,
 	ttl time.Duration,
-	proccessor ProccessorI[T, K],
+	mapper MapperI[T],
 	compressor TransformerI[K],
 ) (cache *CacheDriver[T, K]) {
 
-	cache = New(capacity, capFactor, ttl, proccessor)
+	cache = New[T, K](capacity, capFactor, ttl, mapper)
 	if cache != nil {
 		cache.toCompress = true
 		cache.transformer = compressor
@@ -337,7 +336,7 @@ func (cache *CacheDriver[T, K]) isMru(entry *CacheEntry[K]) bool {
 }
 
 func (cache *CacheDriver[T, K]) isKeyLru(keyVal T) (bool, error) {
-	key, err := cache.proccessor.ToMapKey(keyVal)
+	key, err := cache.mapper.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -351,7 +350,7 @@ func (cache *CacheDriver[T, K]) isKeyLru(keyVal T) (bool, error) {
 
 func (cache *CacheDriver[T, K]) isKeyMru(keyVal T) (bool, error) {
 
-	key, err := cache.proccessor.ToMapKey(keyVal)
+	key, err := cache.mapper.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -416,13 +415,13 @@ func (cache *CacheDriver[T, K]) allocateEntry(
 // immediately returns the cached entry. If the request is the first, then it blocks until the result is
 // ready. If the request is not the first but the result is not still ready, then it blocks
 // until the result is ready
-func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *RequestError) {
+func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor ProccessorI[T, K]) (K, *RequestError) {
 
 	var requestError *RequestError
 	var zeroK K
 	payload := request
 
-	cacheKey, err := cache.proccessor.ToMapKey(payload)
+	cacheKey, err := cache.mapper.ToMapKey(payload)
 	if err != nil {
 		return zeroK, &RequestError{
 			Error: err,
@@ -491,7 +490,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *Reque
 	if err != nil {
 		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
 		// return cache.callUServices(request, payload, other...)
-		return cache.proccessor.CallUServices(request)
+		return proccessor.CallUServices(request)
 	}
 
 	entry.state = COMPUTING
@@ -503,7 +502,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *Reque
 	defer entry.lock.Unlock()
 
 	// retVal, requestError = cache.callUServices(request, payload, other...)
-	retVal, requestError := cache.proccessor.CallUServices(request)
+	retVal, requestError := proccessor.CallUServices(request)
 	if requestError != nil {
 		switch {
 		case requestError.Code == Status4xx || requestError.Code == Status4xxCached:
@@ -551,7 +550,7 @@ func (cache *CacheDriver[T, K]) remove(entry *CacheEntry[K]) {
 
 // has return true is state in the cache
 func (cache *CacheDriver[T, K]) has(val T) bool {
-	key, err := cache.proccessor.ToMapKey(val)
+	key, err := cache.mapper.ToMapKey(val)
 	// key, err := cache.toMapKey(val)
 	if err != nil {
 		return false

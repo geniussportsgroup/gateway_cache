@@ -4,15 +4,23 @@ import (
 	"encoding/json"
 )
 
+// MapperI transfomrs the input to a string key
+// T represents the input type to get a value
+//
+//go:generate mockery --name MapperI --with-expecter=true --filename=mapper_mock.go --inpackage
+type MapperI[T any] interface {
+	ToMapKey(T) (string, error)
+}
+
 // ProccessorI is the interface that wraps the basic ToMapKey and CallUServices methods.
 // ToMapKey is used to convert the input to a string key
 // CallUServices is used to call the upstream services
 // T represents the input type to get a value
 // K represents the valueitself
 //
+
 //go:generate mockery --name ProccessorI --with-expecter=true --filename=proccessor_mock.go --inpackage
 type ProccessorI[T, K any] interface {
-	ToMapKey(T) (string, error)
 	CallUServices(T) (K, *RequestError) //we will leave the preprocess logic for this function
 
 }
