@@ -649,7 +649,15 @@ func (p *MyProcessor) CallUServices(adder Adder) (int, *models.RequestError) {
 
 var seed int64 = 39823823434
 
-func BenchmarkInsert(b *testing.B) {
+func BenchmarkInsertStatic(b *testing.B) {
+	benchInsert(b, seed)
+}
+func BenchmarkInsertDynamic(b *testing.B) {
+	benchInsert(b, time.Now().Unix())
+}
+
+func benchInsert(b *testing.B, seed int64) {
+
 	cache := New[Adder, int](Capacity, 0.5, TTL, &MyProcessor{})
 	rand.Seed(seed)
 	b.ResetTimer()
