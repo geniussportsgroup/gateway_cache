@@ -22,9 +22,8 @@ type MapperI[T any] interface {
 //
 
 //go:generate mockery --name ProccessorI --with-expecter=true --filename=proccessor_mock.go
-type ProccessorI[T, K any] interface {
+type ProcessorI[T, K any] interface {
 	CallUServices(T) (K, *models.RequestError) //we will leave the preprocess logic for this function
-
 }
 
 // CompressorI is the interface that wraps the basic Compress and Decompress methods.

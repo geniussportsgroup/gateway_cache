@@ -12,8 +12,9 @@ import (
 )
 
 // State that a cache entry could have
+
 const (
-	AVAILABLE = iota
+	AVAILABLE models.EntryState = iota
 	COMPUTING
 	COMPUTED
 	FAILED5xx
@@ -22,7 +23,7 @@ const (
 )
 
 const (
-	Status4xx = iota
+	Status4xx models.CodeStatus = iota
 	Status4xxCached
 	Status5xx
 	Status5xxCached
@@ -40,7 +41,7 @@ type CacheEntry[T any] struct {
 	expirationTime                  time.Time
 	prev                            *CacheEntry[T]
 	next                            *CacheEntry[T]
-	state                           int8 // AVAILABLE, COMPUTING, etc
+	state                           models.EntryState // AVAILABLE, COMPUTING, etc
 	err                             error
 }
 
@@ -410,7 +411,7 @@ func (cache *CacheDriver[T, K]) allocateEntry(
 // immediately returns the cached entry. If the request is the first, then it blocks until the result is
 // ready. If the request is not the first but the result is not still ready, then it blocks
 // until the result is ready
-func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor ProccessorI[T, K]) (K, *models.RequestError) {
+func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, processor ProcessorI[T, K]) (K, *models.RequestError) {
 
 	var requestError *models.RequestError
 	var zeroK K
@@ -485,7 +486,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor
 	if err != nil {
 		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
 		// return cache.callUServices(request, payload, other...)
-		return proccessor.CallUServices(request)
+		return processor.CallUServices(request)
 	}
 
 	entry.state = COMPUTING
@@ -497,7 +498,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T, proccessor
 	defer entry.lock.Unlock()
 
 	// retVal, requestError = cache.callUServices(request, payload, other...)
-	retVal, requestError := proccessor.CallUServices(request)
+	retVal, requestError := processor.CallUServices(request)
 	if requestError != nil {
 		switch {
 		case requestError.Code == Status4xx || requestError.Code == Status4xxCached:
