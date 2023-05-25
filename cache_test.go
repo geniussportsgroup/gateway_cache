@@ -2,6 +2,7 @@ package gw_cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -628,3 +629,40 @@ func TestCacheDriver_Touch(t *testing.T) {
 		assert.True(t, mru)
 	}
 }
+
+//benchmark to test the performance of the cache
+//when the processor should perform an addition task
+
+type MyProcessor struct{}
+
+type Adder struct {
+	num1, num2 int
+}
+
+func (p *MyProcessor) ToMapKey(adder Adder) (string, error) {
+	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
+}
+
+func (p *MyProcessor) CallUServices(adder Adder) (int, *models.RequestError) {
+	return adder.num1 + adder.num2, nil
+}
+
+var seed = time.Now().UnixNano()
+
+func BenchmarkInsert(b *testing.B) {
+	cache := New[Adder, int](Capacity, 0.5, TTL, &MyProcessor{})
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		num1 := rand.Intn(100)
+		num2 := rand.Intn(100)
+		adder := Adder{num1, num2}
+		_, _ = cache.RetrieveFromCacheOrCompute(adder)
+	}
+
+}
+
+//go test -bench=. -benchmem
+//goos: darwin
+//goarch: amd64
+//pkg: github.com/geniussportsgroup/gateway_cache
