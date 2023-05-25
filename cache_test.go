@@ -104,52 +104,49 @@ const TTL = 15 * time.Second
 func TestWithCompress(t *testing.T) {
 
 	transformer := mocks.NewTransformerI[any](t)
-	proccessor := mocks.NewProccessorI[any, any](t)
-	mapper := mocks.NewMapperI[any](t)
+	processor := mocks.NewProcessorI[any, any](t)
 	compressor := mocks.NewCompressorI(t)
 
-	mapper.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
-	proccessor.EXPECT().CallUServices(mock.Anything).Return(keats, nil).Times(1)
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	processor.EXPECT().CallUServices(mock.Anything).Return(keats, nil).Times(1)
 	transformer.EXPECT().ValueToBytes(keats).Return([]byte(keats), nil).Times(1)
 	compressedResponse := []byte("compressed")
 	compressor.EXPECT().Compress([]byte(keats)).Return(compressedResponse, nil).Times(1)
 
-	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute, mapper, transformer)
+	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute, processor, transformer)
 	cache.compressor = compressor
 
-	val, ptr := cache.RetrieveFromCacheOrCompute("Keats", proccessor)
+	val, ptr := cache.RetrieveFromCacheOrCompute("Keats")
 	assert.Nil(t, ptr)
 	assert.Equal(t, val, keats)
 
-	mapper.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
 	compressor.EXPECT().Decompress(compressedResponse).Return([]byte(keats), nil).Times(1)
 	transformer.EXPECT().BytesToValue([]byte(keats)).Return(keats, nil).Times(1)
 
-	val, ptr = cache.RetrieveFromCacheOrCompute("Keats", proccessor)
+	val, ptr = cache.RetrieveFromCacheOrCompute("Keats")
 	assert.Nil(t, ptr)
 	assert.Equal(t, val, keats)
 }
 
 func insertEntry[T any](
 	cache *CacheDriver[T, T],
-	proccessor *mocks.ProccessorI[T, T],
-	mapper *mocks.MapperI[T],
+	processor *mocks.ProcessorI[T, T],
 	request T,
 ) (T, *models.RequestError) {
 	s, _ := json.Marshal(request)
-	mapper.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
-	proccessor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
+	processor.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
+	processor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
 
-	return cache.RetrieveFromCacheOrCompute(request, proccessor)
+	return cache.RetrieveFromCacheOrCompute(request)
 }
 
 func createCacheWithCapEntriesInside(
 	capacity int,
-	proccessor *mocks.ProccessorI[*RequestEntry, *RequestEntry],
-	mapper *mocks.MapperI[*RequestEntry],
+	processor *mocks.ProcessorI[*RequestEntry, *RequestEntry],
 ) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
-	cache := New[*RequestEntry, *RequestEntry](capacity, .4, TTL, mapper)
+	cache := New[*RequestEntry, *RequestEntry](capacity, .4, TTL, processor)
 
 	requestTbl := make(map[*RequestEntry]bool)
 	for i := 0; i < capacity; i++ {
@@ -157,7 +154,7 @@ func createCacheWithCapEntriesInside(
 			N:    i + 10,
 			Time: time.Now(),
 		}
-		insertEntry(cache, proccessor, mapper, request)
+		insertEntry(cache, processor, request)
 		requestTbl[request] = true
 	}
 
@@ -166,12 +163,11 @@ func createCacheWithCapEntriesInside(
 
 func createCompressedCacheWithCapEntriesInside(
 	capacity int,
-	proccessor *mocks.ProccessorI[*RequestEntry, *RequestEntry],
-	mapper *mocks.MapperI[*RequestEntry],
+	processor *mocks.ProcessorI[*RequestEntry, *RequestEntry],
 ) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
 	transformer := &DefaultTransformer[*RequestEntry]{}
-	cache := NewWithCompression[*RequestEntry, *RequestEntry](capacity, .4, TTL, mapper, transformer)
+	cache := NewWithCompression[*RequestEntry, *RequestEntry](capacity, .4, TTL, processor, transformer)
 
 	requestTbl := make(map[*RequestEntry]bool)
 	for i := 0; i < capacity; i++ {
@@ -179,7 +175,7 @@ func createCompressedCacheWithCapEntriesInside(
 			N:    i + 10,
 			Time: time.Now(),
 		}
-		insertEntry(cache, proccessor, mapper, request)
+		insertEntry(cache, processor, request)
 		requestTbl[request] = true
 	}
 
@@ -188,9 +184,8 @@ func createCompressedCacheWithCapEntriesInside(
 
 func TestEvictions(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
-	cache, tbl := createCacheWithCapEntriesInside(Capacity, proccessor, mapper)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(Capacity, processor)
 
 	// now we insert Capacity new entries which should evict all the previously inserted ones
 	for i := Capacity; i < 2*Capacity; i++ {
@@ -198,39 +193,36 @@ func TestEvictions(t *testing.T) {
 			N:    i + 10,
 			Time: time.Now(),
 		}
-		b, requestError := insertEntry(cache, proccessor, mapper, request)
+		b, requestError := insertEntry(cache, processor, request)
 		assert.Nil(t, requestError)
 		assert.NotNil(t, b)
 	}
 
 	// now we verify that entries en tbl are not in the cache
 	for req := range tbl {
-		mapper.EXPECT().ToMapKey(req).Return(strconv.Itoa(req.Time.Nanosecond()), nil).Times(1)
+		processor.EXPECT().ToMapKey(req).Return(strconv.Itoa(req.Time.Nanosecond()), nil).Times(1)
 		assert.False(t, cache.has(req))
 	}
 }
 
 func TestCacheDriver_Has(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
-	cache, tbl := createCacheWithCapEntriesInside(Capacity, proccessor, mapper)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(Capacity, processor)
 
 	for req := range tbl {
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
 		assert.True(t, cache.has(req))
 	}
 }
 
 func TestLRUOrder(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, _ := createCacheWithCapEntriesInside(
 		Capacity,
-		proccessor,
-		mapper,
+		processor,
 	)
 
 	it := cache.NewCacheIt()
@@ -245,18 +237,17 @@ func TestLRUOrder(t *testing.T) {
 func TestCacheDriver_testTTL(t *testing.T) {
 
 	ttl := 3 * time.Second
-	proccessor := mocks.NewProccessorI[any, any](t)
-	mapper := mocks.NewMapperI[any](t)
-	cache := New[any, any](Capacity, .4, ttl, mapper)
+	processor := mocks.NewProcessorI[any, any](t)
+	cache := New[any, any](Capacity, .4, ttl, processor)
 
 	request := &RequestEntry{
 		N:    10,
 		Time: time.Now(),
 	}
 
-	mapper.EXPECT().ToMapKey(request).Return(strconv.Itoa(request.Time.Nanosecond()), nil).Times(2)
-	proccessor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
-	b, requestError := cache.RetrieveFromCacheOrCompute(request, proccessor)
+	processor.EXPECT().ToMapKey(request).Return(strconv.Itoa(request.Time.Nanosecond()), nil).Times(2)
+	processor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
+	b, requestError := cache.RetrieveFromCacheOrCompute(request)
 	assert.Nil(t, requestError)
 	assert.NotNil(t, b)
 
@@ -266,12 +257,10 @@ func TestCacheDriver_testTTL(t *testing.T) {
 }
 
 func TestRandomTouches(t *testing.T) {
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		2,
-		proccessor,
-		mapper,
+		processor,
 	)
 
 	N := len(tbl)
@@ -286,8 +275,8 @@ func TestRandomTouches(t *testing.T) {
 	for i := range rand.Perm(N) {
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
-		b, requestError := cache.RetrieveFromCacheOrCompute(req, proccessor)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		b, requestError := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, requestError)
 
 		assert.Equal(t, cache.getMru().postProcessedResponse, b)
@@ -295,12 +284,10 @@ func TestRandomTouches(t *testing.T) {
 }
 
 func TestCompressRandomTouches(t *testing.T) {
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCompressedCacheWithCapEntriesInside(
 		2,
-		proccessor,
-		mapper,
+		processor,
 	)
 
 	N := len(tbl)
@@ -315,8 +302,8 @@ func TestCompressRandomTouches(t *testing.T) {
 	for i := range rand.Perm(N) {
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
-		b, requestError := cache.RetrieveFromCacheOrCompute(req, proccessor)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		b, requestError := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, requestError)
 
 		decompressedReponse, _ := cache.compressor.Decompress(cache.getMru().postProcessedResponseCompressed)
@@ -327,12 +314,10 @@ func TestCompressRandomTouches(t *testing.T) {
 
 func TestCacheDriver_CacheState(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		2,
-		proccessor,
-		mapper,
+		processor,
 	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
@@ -345,8 +330,8 @@ func TestCacheDriver_CacheState(t *testing.T) {
 		i := rand.Intn(N)
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
-		_, _ = cache.RetrieveFromCacheOrCompute(req, proccessor)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 	}
 
 	state, err := cache.GetState()
@@ -357,12 +342,10 @@ func TestCacheDriver_CacheState(t *testing.T) {
 
 func TestCacheDriver_Clean(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
-		proccessor,
-		mapper,
+		processor,
 	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
@@ -375,8 +358,8 @@ func TestCacheDriver_Clean(t *testing.T) {
 		i := rand.Intn(N)
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
-		_, _ = cache.RetrieveFromCacheOrCompute(req, proccessor)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 	}
 
 	err := cache.Clean()
@@ -398,7 +381,6 @@ func TestCacheDriver_Clean(t *testing.T) {
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {
-	// proccessor := NewProccessorI[*RequestEntry, *RequestEntry](t)
 	processor := &MyProccessor{}
 	cache := New[*RequestEntry, []byte](Capacity, .4, TTL, processor)
 
@@ -408,7 +390,7 @@ func TestCacheDriver_HitCost(t *testing.T) {
 			N:    i + 10,
 			Time: time.Now(),
 		}
-		cache.RetrieveFromCacheOrCompute(request, processor)
+		cache.RetrieveFromCacheOrCompute(request)
 		requestTbl[request] = true
 	}
 	// 	1,
@@ -423,7 +405,7 @@ func TestCacheDriver_HitCost(t *testing.T) {
 	// some random touches
 	for i := 0; i < 1000000; i++ {
 		req := requests[0]
-		_, err := cache.RetrieveFromCacheOrCompute(req, processor)
+		_, err := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, err)
 	}
 }
@@ -449,7 +431,7 @@ func TestConcurrency(t *testing.T) {
 			Time: time.Now(),
 		}
 
-		_, _ = cache.RetrieveFromCacheOrCompute(request, myProccessor)
+		_, _ = cache.RetrieveFromCacheOrCompute(request)
 		tbl[request] = true
 	}
 
@@ -473,7 +455,7 @@ func TestConcurrency(t *testing.T) {
 				for j := 0; j < NumRepeatedCalls; j++ {
 
 					go func(req *RequestEntry) {
-						_, requestError := cache.RetrieveFromCacheOrCompute(req, myProccessor)
+						_, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
 
 						// var response Response
@@ -514,7 +496,7 @@ func TestConcurrencyAndCompress(t *testing.T) {
 			Time: time.Now(),
 		}
 
-		_, _ = cache.RetrieveFromCacheOrCompute(request, myProccessor)
+		_, _ = cache.RetrieveFromCacheOrCompute(request)
 		tbl[request] = true
 	}
 
@@ -538,7 +520,7 @@ func TestConcurrencyAndCompress(t *testing.T) {
 				for j := 0; j < NumRepeatedCalls; j++ {
 
 					go func(req *RequestEntry) {
-						response, requestError := cache.RetrieveFromCacheOrCompute(req, myProccessor)
+						response, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
 
 						ref := &Response{}
@@ -559,12 +541,10 @@ func TestConcurrencyAndCompress(t *testing.T) {
 
 func TestCacheDriver_LazyRemove(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
-		proccessor,
-		mapper,
+		processor,
 	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
@@ -578,15 +558,15 @@ func TestCacheDriver_LazyRemove(t *testing.T) {
 		req := requests[i]
 		lastRequest = req
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
-		_, _ = cache.RetrieveFromCacheOrCompute(req, proccessor)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 		isMru, err := cache.isKeyMru(req)
 		assert.Nil(t, err)
 		assert.True(t, isMru)
 	}
 
 	s, _ := json.Marshal(lastRequest)
-	mapper.EXPECT().ToMapKey(lastRequest).Return(string(s), nil).Times(2)
+	processor.EXPECT().ToMapKey(lastRequest).Return(string(s), nil).Times(2)
 	err := cache.LazyRemove(lastRequest)
 	assert.Nil(t, err)
 	assert.False(t, cache.has(lastRequest))
@@ -594,12 +574,10 @@ func TestCacheDriver_LazyRemove(t *testing.T) {
 
 func TestCacheDriver_Contains(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
-		proccessor,
-		mapper,
+		processor,
 	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
@@ -610,14 +588,14 @@ func TestCacheDriver_Contains(t *testing.T) {
 	for i := 0; i < N; i++ {
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
-		_, _ = cache.RetrieveFromCacheOrCompute(req, proccessor)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 	}
 
 	for i := 0; i < N; i++ {
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
 		ok, err := cache.Contains(req)
 		assert.Nil(t, err)
 		assert.True(t, ok)
@@ -626,12 +604,10 @@ func TestCacheDriver_Contains(t *testing.T) {
 
 func TestCacheDriver_Touch(t *testing.T) {
 
-	proccessor := mocks.NewProccessorI[*RequestEntry, *RequestEntry](t)
-	mapper := mocks.NewMapperI[*RequestEntry](t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
-		proccessor,
-		mapper,
+		processor,
 	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
@@ -642,7 +618,7 @@ func TestCacheDriver_Touch(t *testing.T) {
 	for i := 0; i < N; i++ {
 		req := requests[i]
 		s, _ := json.Marshal(req)
-		mapper.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
 		err := cache.Touch(req)
 		assert.Nil(t, err)
 

@@ -6,14 +6,6 @@ import (
 	"github.com/geniussportsgroup/gateway_cache/models"
 )
 
-// MapperI transfomrs the input to a string key
-// T represents the input type to get a value
-//
-//go:generate mockery --name MapperI --with-expecter=true --filename=mapper_mock.go
-type MapperI[T any] interface {
-	ToMapKey(T) (string, error)
-}
-
 // ProccessorI is the interface that wraps the basic ToMapKey and CallUServices methods.
 // ToMapKey is used to convert the input to a string key
 // CallUServices is used to call the upstream services
@@ -21,9 +13,10 @@ type MapperI[T any] interface {
 // K represents the valueitself
 //
 
-//go:generate mockery --name ProccessorI --with-expecter=true --filename=proccessor_mock.go
+//go:generate mockery --name ProcessorI --with-expecter=true --filename=processor_mock.go
 type ProcessorI[T, K any] interface {
-	CallUServices(T) (K, *models.RequestError) //we will leave the preprocess logic for this function
+	ToMapKey(T) (string, error)
+	CallUServices(T) (K, *models.RequestError) //we will leave the pre process logic for this function
 }
 
 // CompressorI is the interface that wraps the basic Compress and Decompress methods.

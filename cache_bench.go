@@ -6,5 +6,3 @@ package gw_cache
 type MyProcessor struct {
 	a, b int
 }
-
-func (p *MyProcessor) CallUServices()
