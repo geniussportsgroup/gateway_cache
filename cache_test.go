@@ -662,8 +662,8 @@ func benchInsert(b *testing.B, seed int64) {
 	rand.Seed(seed)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		num1 := rand.Intn(100)
-		num2 := rand.Intn(100)
+		num1 := rand.Int()
+		num2 := rand.Int()
 		adder := Adder{num1, num2}
 		_, _ = cache.RetrieveFromCacheOrCompute(adder)
 	}
