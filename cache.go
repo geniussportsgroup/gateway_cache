@@ -511,7 +511,6 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
 	defer entry.lock.Unlock()
 
-	// retVal, requestError = cache.callUServices(request, payload, other...)
 	retVal, requestError := cache.processor.CacheMissSolver(request)
 	if requestError != nil {
 		switch requestError.Code {
@@ -528,7 +527,6 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 	}
 
 	if withCompression {
-		// buf, err := cache.valueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
 			entry.state = FAILED5xx
@@ -540,8 +538,6 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 		} else {
 			entry.postProcessedResponseCompressed = lz4Buf
 		}
-		// if you want to store the compressed representation
-		// your type should be a []byte, to validate it we use the interface{}(lz4Buf).(K)
 
 	}
 
