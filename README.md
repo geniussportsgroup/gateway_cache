@@ -85,3 +85,6 @@ The cache could start to reject requests if it receives more different requests 
 Internally, the cache handles a GO map from a string version of a request to a cache entry containing control information and the request and its response. The GO maps are implemented through a hash table that eventually could require a resize when the load factor becomes high (about 80 % of occupation). A new request arrival could cause, since this the only moment when caching insertions occur. Consequently, this could slow down the response time. The proper way for avoiding this event is to ensure that the table size is always enough. That implies that the size should always be greater than the number of inserted entries. This is the reason for the capFactor parameter received by the constructor.
 
 We advise using a capFactor of at least 0.5 or more.
+
+### Possible problem with ttl
+
