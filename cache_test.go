@@ -668,6 +668,17 @@ func BenchmarkInsertStatic(b *testing.B) {
 	benchInsert(b, seed)
 }
 
+func createRandomArray(seed int64, size int) []Adder {
+	rand.Seed(seed)
+	arr := make([]Adder, size)
+	for i := 0; i < size; i++ {
+		num1 := rand.Int()
+		num2 := rand.Int()
+		arr[i] = Adder{num1, num2}
+	}
+	return arr
+}
+
 func BenchmarkInsertDynamic(b *testing.B) {
 	benchInsert(b, time.Now().Unix())
 }
@@ -677,7 +688,7 @@ func benchInsert(b *testing.B, seed int64) {
 	rand.Seed(seed)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < 100; j++ {
+		for j := 0; j < 1e6; j++ {
 
 			num1 := rand.Int()
 			num2 := rand.Int()
@@ -686,6 +697,30 @@ func benchInsert(b *testing.B, seed int64) {
 
 		}
 	}
+}
+
+func benchInsertAvalanche(b *testing.B, seed int64) {
+	var size int = 1e3
+	arr := createRandomArray(seed, size)
+	cache := New(Capacity, 0.5, TTL, ToMapKey, nil, CallUServices)
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < size; j++ {
+			for k := 0; k < 1e3; k++ {
+				_, _ = cache.RetrieveFromCacheOrCompute(arr[j])
+			}
+		}
+	}
+
+}
+
+func BenchmarkAvalancheStatic(b *testing.B) {
+	benchInsertAvalanche(b, seed)
+}
+
+func BenchmarkAvalancheDynamic(b *testing.B) {
+	benchInsertAvalanche(b, time.Now().Unix())
 }
 
 //go test -bench=. -benchmem
