@@ -724,11 +724,12 @@ func (p *BenchProcessorComplexStruct) ToMapKey(complexStruct ComplexStruct) (str
 
 func (p *BenchProcessorComplexStruct) CallUServices(complexStruct ComplexStruct) (int, *models.RequestError) {
 	//print each field
-	_ = complexStruct.A
-	_ = complexStruct.B
-	_ = complexStruct.Embed.C
-	_ = complexStruct.Embed.D
-	return 0, nil
+	var rest int
+	if complexStruct.A {
+		rest = complexStruct.Embed.C + int(complexStruct.Embed.D)
+	}
+	fmt.Println(complexStruct.B)
+	return rest, nil
 }
 
 func instanceComplexRandomStruct(seed int64) ComplexStruct {
