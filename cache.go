@@ -46,6 +46,7 @@ type CacheEntry[T any] struct {
 }
 
 // CacheDriver The cache itself T represents the request type and K the response type
+// TODO: update doc
 type CacheDriver[T any, K any] struct {
 	table            map[string]*CacheEntry[K]
 	missCount        int
@@ -57,7 +58,7 @@ type CacheDriver[T any, K any] struct {
 	extendedCapacity int
 	numEntries       int
 	toCompress       bool
-	processor        ProcessorI[T, K]
+	processor        ProcessorI[T, K] // TODO: to comment these interfaces
 	transformer      TransformerI[K]
 	compressor       CompressorI
 }
