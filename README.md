@@ -8,6 +8,8 @@
 		- [Liveness danger](#liveness-danger)
 		- [Possible performance issue with internal hash Table](#possible-performance-issue-with-internal-hash-table)
 
+gateway_cache implements a simple cache from HTTP requests to their responses. An essential quality is that the cache can receive repeated requests before computing the first one. In such a case, the repeated requests will wait without contention for other different requests until the response is ready.
+
 Once the response is ready, the runtime will free the retained repeated requests, and the flow will continue in a usual way.
 
 ## Declaration
