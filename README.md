@@ -1,6 +1,7 @@
 # A cache for API gateways
 
 - [A cache for API gateways](#a-cache-for-api-gateways)
+	- [Installation](#installation)
 	- [Declaration](#declaration)
 	- [Usage](#usage)
 	- [Notes on its implementation](#notes-on-its-implementation)
@@ -11,6 +12,12 @@
 gateway_cache implements a simple cache from HTTP requests to their responses. An essential quality is that the cache can receive repeated requests before computing the first one. In such a case, the repeated requests will wait without contention for other different requests until the response is ready.
 
 Once the response is ready, the runtime will free the retained repeated requests, and the flow will continue in a usual way.
+
+## Installation
+
+```Bash
+ go get -U github.com/geniussportsgroup/gateway_cache
+```
 
 ## Declaration
 
