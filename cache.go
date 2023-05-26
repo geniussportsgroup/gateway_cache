@@ -307,7 +307,7 @@ func NewWithCompression[T any, K any](
 	compressor TransformerI[K],
 ) (cache *CacheDriver[T, K]) {
 
-	cache = New[T, K](capacity, capFactor, ttl, processor)
+	cache = New(capacity, capFactor, ttl, processor)
 	if cache != nil {
 		cache.toCompress = true
 		cache.transformer = compressor
