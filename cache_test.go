@@ -707,7 +707,73 @@ func BenchmarkAvalancheDynamic(b *testing.B) {
 	benchInsertAvalanche(b, time.Now().Unix())
 }
 
-//go test -bench=. -benchmem
-//goos: darwin
-//goarch: amd64
-//pkg: github.com/geniussportsgroup/gateway_cache
+type BenchProcessorComplexStruct struct{}
+
+type ComplexStruct struct {
+	A     bool
+	B     string
+	Embed struct {
+		C int
+		D float64
+	}
+}
+
+func (p *BenchProcessorComplexStruct) ToMapKey(complexStruct ComplexStruct) (string, error) {
+	return fmt.Sprintf("%v", complexStruct), nil
+}
+
+func (p *BenchProcessorComplexStruct) CallUServices(complexStruct ComplexStruct) (int, *models.RequestError) {
+	//print each field
+	_ = complexStruct.A
+	_ = complexStruct.B
+	_ = complexStruct.Embed.C
+	_ = complexStruct.Embed.D
+	return 0, nil
+}
+
+func instanceComplexRandomStruct(seed int64) ComplexStruct {
+	rand.Seed(seed)
+	var complexStruct ComplexStruct
+	complexStruct.A = rand.Int()%2 == 0
+	complexStruct.B = "hello"
+	complexStruct.Embed.C = rand.Int()
+	complexStruct.Embed.D = rand.Float64()
+	return complexStruct
+}
+
+func benchInsertAvalancheComplexStruct(b *testing.B, seed int64) {
+	var size int = 1e3
+	arr := make([]ComplexStruct, size)
+	for i := 0; i < size; i++ {
+		arr[i] = instanceComplexRandomStruct(seed)
+	}
+	cache := New[ComplexStruct, int](Capacity, 0.5, TTL, &BenchProcessorComplexStruct{})
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < size; j++ {
+			for k := 0; k < 1e3; k++ {
+				_, _ = cache.RetrieveFromCacheOrCompute(arr[j])
+			}
+		}
+	}
+
+}
+
+func BenchmarkAvalancheComplexStructStatic(b *testing.B) {
+	benchInsertAvalancheComplexStruct(b, seed)
+}
+
+func BenchmarkAvalancheComplexStructDynamic(b *testing.B) {
+	benchInsertAvalancheComplexStruct(b, time.Now().Unix())
+}
+
+// go test -benchmem -run=^$ -bench ^BenchmarkAvalancheComplexStruct github.com/geniussportsgroup/gateway_cache
+// goos: linux
+// goarch: amd64
+// pkg: github.com/geniussportsgroup/gateway_cache
+// cpu: Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz
+// BenchmarkAvalancheComplexStructStatic-12               2         593485878 ns/op        112053816 B/op   2000135 allocs/op
+// BenchmarkAvalancheComplexStructDynamic-12              2         582352201 ns/op        112049932 B/op   2000100 allocs/op
+// PASS
+// ok      github.com/geniussportsgroup/gateway_cache      3.558s
