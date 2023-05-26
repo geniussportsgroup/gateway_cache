@@ -60,11 +60,6 @@ type CacheDriver[T any, K any] struct {
 	processor        ProcessorI[T, K]
 	transformer      TransformerI[K]
 	compressor       CompressorI
-	// toMapKey          func(key interface{}) (string, error)
-	// valueToBytes      func(value interface{}) ([]byte, error)
-	// bytesToValue      func([]byte) (interface{}, error)
-	// preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError)
-	// callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
 }
 
 func (cache *CacheDriver[T, K]) MissCount() int {
