@@ -4,6 +4,7 @@
 	- [Installation](#installation)
 	- [Declaration](#declaration)
 	- [Usage](#usage)
+		- [Example](#example)
 	- [Notes on its implementation](#notes-on-its-implementation)
 		- [Parameters selection](#parameters-selection)
 		- [Liveness danger](#liveness-danger)
@@ -63,6 +64,11 @@ If it is the first request, then the flow blocks, but the process coded in `Cach
 Once the result is gotten (by `CacheMissSolver` function), all the retained requests are unblocked, and the flow continues as usual.  
 
 If the result is already in the cache, then the cache retrieves the result, return it, and the flow continues in a usual way without blocking.
+
+### Example
+
+Here is an complete [example](https://github.com/geniussportsgroup/gateway_cache/blob/5ab788f7ade7b06b6c02e16d701ca04b382b6ad8/main/main.go#LL1)
+
 
 ## Notes on its implementation  
 
