@@ -47,7 +47,7 @@ func (p *MyProcessor) ToMapKey(entry *RequestEntry) (string, error) {
 	return string(b), nil
 }
 
-func (p *MyProcessor) CallUServices(request *RequestEntry) ([]byte, *models.RequestError) {
+func (p *MyProcessor) CacheMissSolver(request *RequestEntry) ([]byte, *models.RequestError) {
 
 	entry := request
 	urequest := &URequest{
@@ -109,7 +109,7 @@ func TestWithCompress(t *testing.T) {
 	compressor := mocks.NewCompressorI(t)
 
 	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
-	processor.EXPECT().CallUServices(mock.Anything).Return(keats, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(mock.Anything).Return(keats, nil).Times(1)
 	transformer.EXPECT().ValueToBytes(keats).Return([]byte(keats), nil).Times(1)
 	compressedResponse := []byte("compressed")
 	compressor.EXPECT().Compress([]byte(keats)).Return(compressedResponse, nil).Times(1)
@@ -137,7 +137,7 @@ func insertEntry[T any](
 ) (T, *models.RequestError) {
 	s, _ := json.Marshal(request)
 	processor.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
-	processor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
 
 	return cache.RetrieveFromCacheOrCompute(request)
 }
@@ -247,7 +247,7 @@ func TestCacheDriver_testTTL(t *testing.T) {
 	}
 
 	processor.EXPECT().ToMapKey(request).Return(strconv.Itoa(request.Time.Nanosecond()), nil).Times(2)
-	processor.EXPECT().CallUServices(request).Return(request, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
 	b, requestError := cache.RetrieveFromCacheOrCompute(request)
 	assert.Nil(t, requestError)
 	assert.NotNil(t, b)
@@ -643,7 +643,7 @@ func (p *BenchProcessor) ToMapKey(adder Adder) (string, error) {
 	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
 }
 
-func (p *BenchProcessor) CallUServices(adder Adder) (int, *models.RequestError) {
+func (p *BenchProcessor) CacheMissSolver(adder Adder) (int, *models.RequestError) {
 	return adder.num1 + adder.num2, nil
 }
 

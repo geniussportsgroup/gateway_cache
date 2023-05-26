@@ -12,7 +12,6 @@ import (
 )
 
 // State that a cache entry could have
-
 const (
 	AVAILABLE models.EntryState = iota
 	COMPUTING
@@ -31,35 +30,38 @@ const (
 )
 
 // CacheEntry Every cache entry has this information
-type CacheEntry[T any] struct {
+type CacheEntry[K any] struct {
 	cacheKey                        string     // key stringficated; needed for removal operation
 	lock                            sync.Mutex // lock for repeated requests
 	cond                            *sync.Cond // used in conjunction with the lock for repeated request until result is ready
-	postProcessedResponse           T
+	postProcessedResponse           K
 	postProcessedResponseCompressed []byte
 	timestamp                       time.Time // Last time accessed
 	expirationTime                  time.Time
-	prev                            *CacheEntry[T]
-	next                            *CacheEntry[T]
+	prev                            *CacheEntry[K]
+	next                            *CacheEntry[K]
 	state                           models.EntryState // AVAILABLE, COMPUTING, etc
 	err                             error
 }
 
-// CacheDriver The cache itself T represents the request type and K the response type
-// TODO: update doc
-type CacheDriver[T any, K any] struct {
-	table            map[string]*CacheEntry[K]
+// CacheDriver The cache itself.
+//
+// K represents the request's type this will be used as key.
+//
+// T the response's type this will be used as value.
+type CacheDriver[K any, T any] struct {
+	table            map[string]*CacheEntry[T]
 	missCount        int
 	hitCount         int
 	ttl              time.Duration
-	head             CacheEntry[K] // sentinel header node
+	head             CacheEntry[T] // sentinel header node
 	lock             sync.Mutex
 	capacity         int
 	extendedCapacity int
 	numEntries       int
 	toCompress       bool
-	processor        ProcessorI[T, K] // TODO: to comment these interfaces
-	transformer      TransformerI[K]
+	processor        ProcessorI[K, T]
+	transformer      TransformerI[T]
 	compressor       CompressorI
 }
 
@@ -210,20 +212,20 @@ func (cache *CacheDriver[T, K]) Contains(keyVal T) (bool, error) {
 //
 // ttl: time to live of a cache entry
 //
-// toMapKey is a function in charge of transforming the request into a string
+// processor: is an interface that must be implemented by the user. It is in charge of transforming the request
+// into a string and get the value in case that does not exist in the cache
 //
-// preProcessRequest is an optional function that could be used for validation, transforming
-// the request in a more suitable form, etc.
-//
-// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
-// service response
-func New[T any, K any](
+//	type ProcessorI[K any, T any] interface {
+//		ToMapKey(keyVal T) (string, error) //Is the function in charge of transforming the request into a string
+//		CacheMissSolver(K) (T, *models.RequestError)  //Is the function in charge of getting the value in case that does not exist in the cache
+//	}
+func New[K any, T any](
 	capacity int,
 	capFactor float64,
 	ttl time.Duration,
-	processor ProcessorI[T, K],
+	processor ProcessorI[K, T],
 
-) *CacheDriver[T, K] {
+) *CacheDriver[K, T] {
 
 	if capFactor < 0.1 || capFactor > 3.0 {
 		panic(fmt.Sprintf("invalid capFactor %f. It should be in [0.1, 3]",
@@ -231,19 +233,16 @@ func New[T any, K any](
 	}
 
 	extendedCapacity := math.Ceil((1.0 + capFactor) * float64(capacity))
-	ret := &CacheDriver[T, K]{
+	ret := &CacheDriver[K, T]{
 		missCount:        0,
 		hitCount:         0,
 		capacity:         capacity,
 		extendedCapacity: int(extendedCapacity),
 		numEntries:       0,
 		ttl:              ttl,
-		table:            make(map[string]*CacheEntry[K], int(extendedCapacity)),
+		table:            make(map[string]*CacheEntry[T], int(extendedCapacity)),
 		processor:        processor,
 		compressor:       lz4Compressor{},
-		// toMapKey:          toMapKey,
-		// preProcessRequest: preProcessRequest,
-		// callUServices:     callUServices,
 	}
 	ret.head.prev = &ret.head
 	ret.head.next = &ret.head
@@ -260,7 +259,7 @@ func New[T any, K any](
 // second function, bytesToValue, takes a serialized representation of the value stored into the
 // cache, and it transforms it to the original representation.
 //
-// Parameters are:
+// The parameters are:
 //
 // capacity: maximum number of entries that cache can manage without evicting the least recently used
 //
@@ -268,19 +267,38 @@ func New[T any, K any](
 //
 // ttl: time to live of a cache entry
 //
-// toMapKey is a function in charge of transforming the request into a string
+// processor: is an interface that must be implemented by the user. It is in charge of transforming the request
+// into a string and get the value in case that does not exist in the cache
 //
-// valueToBytes transforms the value into a []byte
+//	type ProcessorI[K any, T any] interface {
+//		ToMapKey(keyVal T) (string, error) //Is the function in charge of transforming the request into a string
+//		CacheMissSolver(K) (T, *models.RequestError)  //Is the function in charge of getting the value in case that does not exist in the cache
+//	}
 //
-// bytesToValue transforms a []byte into the original value representation
+// transformer: is an interface that must be implemented by the user. It is in charge of transforming the value
+// into a byte slice and vice versa
 //
-// valueToBytes
+//	type Transformer[T any] interface {
+//		ValueToBytes(T) ([]byte, error)
+//		BytesToValue([]byte) (T, error)
+//	}
 //
-// preProcessRequest is an optional function that could be used for validation, transforming
-// the request in a more suitable form, etc.
+// it is a default implementation of the transformer interface that you can use
 //
-// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
-// service response
+//	type DefaultTransformer[T any] struct{}
+//
+//	func (_ *DefaultTransformer[T]) BytesToValue(in []byte) (T, error) {
+//		var out T
+//		err := json.Unmarshal(in, &out)
+//		if err != nil {
+//			return out, err
+//		}
+//		return out, nil
+//	}
+//
+//	func (_ *DefaultTransformer[T]) ValueToBytes(in T) ([]byte, error) {
+//			return json.Marshal(in)
+//		}
 func NewWithCompression[T any, K any](
 	capacity int,
 	capFactor float64,
@@ -482,7 +500,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 	if err != nil {
 		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
 		// return cache.callUServices(request, payload, other...)
-		return cache.processor.CallUServices(request)
+		return cache.processor.CacheMissSolver(request)
 	}
 
 	entry.state = COMPUTING
@@ -494,7 +512,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 	defer entry.lock.Unlock()
 
 	// retVal, requestError = cache.callUServices(request, payload, other...)
-	retVal, requestError := cache.processor.CallUServices(request)
+	retVal, requestError := cache.processor.CacheMissSolver(request)
 	if requestError != nil {
 		switch requestError.Code {
 		case Status4xx, Status4xxCached:
