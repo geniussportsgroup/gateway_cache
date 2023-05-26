@@ -26,7 +26,7 @@ type URequest struct {
 	Request  *RequestEntry
 	PutValue string
 }
-type MyProccessor struct {
+type MyProcessor struct {
 	putValue string
 }
 
@@ -39,7 +39,7 @@ type Response struct {
 	Poem      string
 }
 
-func (p *MyProccessor) ToMapKey(entry *RequestEntry) (string, error) {
+func (p *MyProcessor) ToMapKey(entry *RequestEntry) (string, error) {
 	b, err := json.Marshal(entry)
 	if err != nil {
 		return "", err
@@ -47,7 +47,7 @@ func (p *MyProccessor) ToMapKey(entry *RequestEntry) (string, error) {
 	return string(b), nil
 }
 
-func (p *MyProccessor) CallUServices(request *RequestEntry) ([]byte, *models.RequestError) {
+func (p *MyProcessor) CallUServices(request *RequestEntry) ([]byte, *models.RequestError) {
 
 	entry := request
 	urequest := &URequest{
@@ -71,7 +71,7 @@ func (p *MyProccessor) CallUServices(request *RequestEntry) ([]byte, *models.Req
 }
 func TestNew(t *testing.T) {
 
-	mp := &MyProccessor{}
+	mp := &MyProcessor{}
 	cache := New[*RequestEntry, []byte](
 		100,
 		.4,
@@ -89,7 +89,7 @@ func TestNew(t *testing.T) {
 
 func TestBadFactor(t *testing.T) {
 
-	mp := &MyProccessor{}
+	mp := &MyProcessor{}
 	assert.Panics(t, func() {
 		New[*RequestEntry, []byte](100, .099, time.Minute, mp)
 	})
@@ -382,7 +382,7 @@ func TestCacheDriver_Clean(t *testing.T) {
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {
-	processor := &MyProccessor{}
+	processor := &MyProcessor{}
 	cache := New[*RequestEntry, []byte](Capacity, .4, TTL, processor)
 
 	requestTbl := make(map[*RequestEntry]bool)
@@ -417,7 +417,7 @@ func TestConcurrency(t *testing.T) {
 	const SuperCap = 3037
 	const NumRepeatedCalls = 50
 
-	myProccessor := &MyProccessor{}
+	myProccessor := &MyProcessor{}
 	cache := New[*RequestEntry, []byte](
 		SuperCap,
 		.3,
@@ -480,7 +480,7 @@ func TestConcurrencyAndCompress(t *testing.T) {
 	const SuperCap = 1019
 	const NumRepeatedCalls = 20
 
-	myProccessor := &MyProccessor{}
+	myProccessor := &MyProcessor{}
 	defaultTransformer := &DefaultTransformer[[]byte]{}
 	cache := NewWithCompression[*RequestEntry, []byte](
 		SuperCap,
@@ -633,17 +633,17 @@ func TestCacheDriver_Touch(t *testing.T) {
 //benchmark to test the performance of the cache
 //when the processor should perform an addition task
 
-type MyProcessor struct{}
+type BenchProcessor struct{}
 
 type Adder struct {
 	num1, num2 int
 }
 
-func (p *MyProcessor) ToMapKey(adder Adder) (string, error) {
+func (p *BenchProcessor) ToMapKey(adder Adder) (string, error) {
 	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
 }
 
-func (p *MyProcessor) CallUServices(adder Adder) (int, *models.RequestError) {
+func (p *BenchProcessor) CallUServices(adder Adder) (int, *models.RequestError) {
 	return adder.num1 + adder.num2, nil
 }
 
@@ -658,7 +658,7 @@ func BenchmarkInsertDynamic(b *testing.B) {
 
 func benchInsert(b *testing.B, seed int64) {
 
-	cache := New[Adder, int](Capacity, 0.5, TTL, &MyProcessor{})
+	cache := New[Adder, int](Capacity, 0.5, TTL, &BenchProcessor{})
 	rand.Seed(seed)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -670,6 +670,41 @@ func benchInsert(b *testing.B, seed int64) {
 		}
 	}
 
+}
+
+func createRandomArray(seed int64, size int) []Adder {
+	rand.Seed(seed)
+	arr := make([]Adder, size)
+	for i := 0; i < size; i++ {
+		num1 := rand.Int()
+		num2 := rand.Int()
+		arr[i] = Adder{num1, num2}
+	}
+	return arr
+}
+
+func benchInsertAvalanche(b *testing.B, seed int64) {
+	var size int = 1e3
+	arr := createRandomArray(seed, size)
+	cache := New[Adder, int](Capacity, 0.5, TTL, &BenchProcessor{})
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < size; j++ {
+			for k := 0; k < 1e3; k++ {
+				_, _ = cache.RetrieveFromCacheOrCompute(arr[j])
+			}
+		}
+	}
+
+}
+
+func BenchmarkAvalancheStatic(b *testing.B) {
+	benchInsertAvalanche(b, seed)
+}
+
+func BenchmarkAvalancheDynamic(b *testing.B) {
+	benchInsertAvalanche(b, time.Now().Unix())
 }
 
 //go test -bench=. -benchmem
