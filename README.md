@@ -9,6 +9,7 @@
 		- [Parameters selection](#parameters-selection)
 		- [Liveness danger](#liveness-danger)
 		- [Possible performance issue with internal hash Table](#possible-performance-issue-with-internal-hash-table)
+		- [Possible problem with ttl](#possible-problem-with-ttl)
 
 Gateway_cache implements a simple cache from HTTP requests to their responses. An essential quality is that the cache can receive repeated requests before computing the first one. In such a case, the repeated requests will wait without contention for other different requests until the response is ready.
 
@@ -67,7 +68,7 @@ If the result is already in the cache, then the cache retrieves the result, retu
 
 ### Example
 
-Here is an complete [example](https://github.com/geniussportsgroup/gateway_cache/blob/5ab788f7ade7b06b6c02e16d701ca04b382b6ad8/main/main.go#LL1)
+Here is an complete [example](main/main.go)
 
 
 ## Notes on its implementation  
