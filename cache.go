@@ -111,7 +111,7 @@ func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 		defer entry.lock.Unlock()
 
 		if entry.expirationTime.Before(time.Now()) {
-			return fmt.Errorf("entry expired")
+			return ErrEntryExpired
 		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
@@ -125,10 +125,10 @@ func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 		}
 
 		if entry.state == AVAILABLE {
-			return fmt.Errorf("entry is available state")
+			return ErrEntryAvailableState
 		}
 
-		return fmt.Errorf("entry is computing state")
+		return ErrEntryComputingState
 	}
 
 	cache.lock.Unlock()
@@ -152,7 +152,7 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 
 		currentTime := time.Now()
 		if entry.expirationTime.Before(currentTime) {
-			return fmt.Errorf("entry expired")
+			return ErrEntryExpired
 		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
@@ -166,10 +166,10 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 		}
 
 		if entry.state == AVAILABLE {
-			return fmt.Errorf("entry is available state")
+			return ErrEntryAvailableState
 		}
 
-		return fmt.Errorf("entry is computing state")
+		return ErrEntryComputingState
 	}
 
 	cache.lock.Unlock()
@@ -387,8 +387,7 @@ func (cache *CacheDriver[T, K]) becomeLru(entry *CacheEntry[K]) {
 func (cache *CacheDriver[T, K]) evictLruEntry() (*CacheEntry[K], error) {
 	entry := cache.head.prev // <-- LRU entry
 	if entry.state == COMPUTING {
-		err := errors.New("LRU entry is in COMPUTING state. This could be a bug or a cache misconfiguration")
-		return nil, err
+		return nil, ErrLRUComputing
 	}
 	entry.selfDeleteFromLRUList()
 	cache.table[entry.cacheKey] = nil
@@ -642,7 +641,8 @@ func (cache *CacheDriver[T, K]) clean() error {
 	for it := cache.NewCacheIt(); it.HasCurr(); it.Next() {
 		entry := it.GetCurr()
 		if entry.state == COMPUTING {
-			return errors.New("cannot clean cache because a entry was found waiting for response")
+			return ErrEntryComputingState
+			// return errors.New("cannot clean cache because a entry was found waiting for response")
 		}
 	}
 
@@ -678,7 +678,7 @@ func (cache *CacheDriver[T, K]) Set(capacity int, ttl time.Duration) error {
 
 	if capacity != 0 {
 		if cache.numEntries > capacity {
-			return errors.New("number of entries in the cache is greater than given capacity")
+			return ErrNumOfEntriesBiggerThanCapacity
 		}
 		cache.capacity = capacity
 	}
