@@ -537,9 +537,9 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 		} else {
 			entry.postProcessedResponseCompressed = lz4Buf
 		}
-
 	}
 
+	entry.postProcessedResponse = retVal
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
 	return retVal, requestError

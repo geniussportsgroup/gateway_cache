@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	gw_cache "github.com/geniussportsgroup/gateway_cache"
@@ -18,6 +19,7 @@ func (p *Processor) ToMapKey(someValue int) (string, error) {
 
 // receive the value that will be used as a key and return a string, that will be used as a value
 func (p *Processor) CacheMissSolver(someValue int) (string, *models.RequestError) {
+	time.Sleep(time.Second * 1)
 	return fmt.Sprintf("%d processed", someValue), nil
 }
 
@@ -36,6 +38,19 @@ func main() {
 	)
 
 	// compute and set the value
-	value, err := cache.RetrieveFromCacheOrCompute(3)
-	fmt.Println(value, err) // 3 processed <nil>
+	wg := sync.WaitGroup{}
+	for i := 0; i < 10; i++ {
+		for j := 0; j < 10; j++ {
+			wg.Add(1)
+			go func(i int, wg *sync.WaitGroup) {
+				start := time.Now()
+				value, err := cache.RetrieveFromCacheOrCompute(i)
+				fmt.Printf("with i:%d v:%s, e:%v\n elapsed time %s\n", i, value, err, time.Since(start).Abs())
+				wg.Done()
+			}(i, &wg)
+		}
+	}
+	wg.Wait()
+	fmt.Printf("cache.MissCount(): %v\n", cache.MissCount())
+	fmt.Printf("cache.HitCount(): %v\n", cache.HitCount())
 }
