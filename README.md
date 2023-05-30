@@ -89,3 +89,4 @@ We advise using a capFactor of at least 0.5 or more.
 
 ### Possible problem with ttl
 
+If, within a short interval of time shorter than the TTL, several different keys are added, exceeding the cache's capacity, it will cause the removal of keys that are still available, even if their TTL has not expired. This is because the cache will replace them with the new keys. Avoiding this situation is the responsibility of the client, who should choose the appropriate TTL based on the number of requests that the application expects to receive.
