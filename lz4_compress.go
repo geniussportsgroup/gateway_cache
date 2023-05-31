@@ -2,11 +2,14 @@ package gw_cache
 
 import (
 	"bytes"
-	"github.com/pierrec/lz4"
 	"io"
+
+	"github.com/pierrec/lz4"
 )
 
-func lz4Compress(in []byte) ([]byte, error) {
+type lz4Compressor struct{}
+
+func (_ lz4Compressor) Compress(in []byte) ([]byte, error) {
 	r := bytes.NewReader(in)
 	w := &bytes.Buffer{}
 	zw := lz4.NewWriter(w)
@@ -21,7 +24,7 @@ func lz4Compress(in []byte) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-func lz4Decompress(in []byte) ([]byte, error) {
+func (_ lz4Compressor) Decompress(in []byte) ([]byte, error) {
 	r := bytes.NewReader(in)
 	w := &bytes.Buffer{}
 	zr := lz4.NewReader(r)

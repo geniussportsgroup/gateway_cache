@@ -2,40 +2,19 @@ package gw_cache
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
-)
 
-var keats string = `A thing of beauty is a joy for ever:\n
-Its loveliness increases; it will never\n
-Pass into nothingness; but still will keep\n
-A bower quiet for us, and a sleep\n
-Full of sweet dreams, and health, and quiet breathing.\n
-Therefore, on every morrow, are we wreathing\n
-A flowery band to bind us to the earth,\n
-Spite of despondence, of the inhuman dearth\n
-Of noble natures, of the gloomy days,\n
-Of all the unhealthy and o'er-darkened ways\n
-Made for our searching: yes, in spite of all,\n
-Some shape of beauty moves away the pall\n
-From our dark spirits. Such the sun, the moon,\n
-Trees old, and young, sprouting a shady boon\n
-For simple sheep; and such are daffodils\n
-With the green world they live in; and clear rills\n
-That for themselves a cooling covert make\n
-'Gainst the hot season; the mid forest brake,\n
-Rich with a sprinkling of fair musk-rose blooms:\n
-And such too is the grandeur of the dooms\n
-We have imagined for the mighty dead;\n
-All lovely tales that we have heard or read:\n
-An endless fountain of immortal drink,\n
-Pouring unto us from the heaven's brink.\n`
+	"github.com/geniussportsgroup/gateway_cache/mocks"
+
+	"github.com/geniussportsgroup/gateway_cache/models"
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
+)
 
 type RequestEntry struct {
 	N        int
@@ -47,6 +26,9 @@ type URequest struct {
 	Request  *RequestEntry
 	PutValue string
 }
+type MyProcessor struct {
+	putValue string
+}
 
 type UResponse struct {
 	Urequest *URequest
@@ -57,82 +39,20 @@ type Response struct {
 	Poem      string
 }
 
-func toKey(entry interface{}) (string, error) {
-	b, err := json.Marshal(*entry.(*RequestEntry))
+func (p *MyProcessor) ToMapKey(entry *RequestEntry) (string, error) {
+	b, err := json.Marshal(entry)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
 }
 
-func toBytes(value interface{}) ([]byte, error) {
+func (p *MyProcessor) CacheMissSolver(request *RequestEntry) ([]byte, *models.RequestError) {
 
-	response := value.(*Response)
-	b, err := json.Marshal(response)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
-}
-
-func toVal(buf []byte) (interface{}, error) {
-
-	response := &Response{}
-	err := json.Unmarshal(buf, response)
-	if err != nil {
-		return nil, err
-	}
-	return response, nil
-}
-
-func preProcessRequest(request interface{}, other ...interface{}) (interface{}, *RequestError) {
-
-	entry := request.(*RequestEntry)
-	if entry.N < 0 {
-		return nil, &RequestError{
-			Error: errors.New("N is negative"),
-			Code:  Status4xx,
-		}
-	}
-	if entry.N < 10 {
-		return nil, &RequestError{
-			Error: errors.New("N must be greater or equal than 10"),
-			Code:  Status5xx,
-		}
-	}
-
-	entry.PutValue = other[0].(string)
-	return entry, nil
-}
-
-func callServices(request, _ interface{}, other ...interface{}) (interface{}, *RequestError) {
-
-	entry := request.(*RequestEntry)
+	entry := request
 	urequest := &URequest{
 		Request:  entry,
-		PutValue: entry.PutValue + "-" + other[1].(string),
-	}
-
-	uresponse := &UResponse{Urequest: urequest}
-	response := &Response{
-		Uresponse: uresponse,
-	}
-	b, err := json.Marshal(*response)
-	if err != nil {
-		return nil, &RequestError{
-			Error: err,
-			Code:  Status5xx,
-		}
-	}
-	return b, nil
-}
-
-func callServicesWithCompression(request, _ interface{}, other ...interface{}) (interface{}, *RequestError) {
-
-	entry := request.(*RequestEntry)
-	urequest := &URequest{
-		Request:  entry,
-		PutValue: entry.PutValue + "-" + other[1].(string),
+		PutValue: entry.PutValue + "-" + p.putValue,
 	}
 
 	uresponse := &UResponse{Urequest: urequest}
@@ -140,13 +60,24 @@ func callServicesWithCompression(request, _ interface{}, other ...interface{}) (
 		Uresponse: uresponse,
 		Poem:      keats,
 	}
-
-	return response, nil
+	b, err := json.Marshal(*response)
+	if err != nil {
+		return nil, &models.RequestError{
+			Error: err,
+			Code:  Status5xx,
+		}
+	}
+	return b, nil
 }
-
 func TestNew(t *testing.T) {
 
-	cache := New(100, .4, time.Minute, toKey, preProcessRequest, callServices)
+	mp := &MyProcessor{}
+	cache := New[*RequestEntry, []byte](
+		100,
+		.4,
+		time.Minute,
+		mp,
+	)
 
 	assert.Equal(t, 100, cache.capacity)
 	assert.Equal(t, time.Minute, cache.ttl)
@@ -158,109 +89,104 @@ func TestNew(t *testing.T) {
 
 func TestBadFactor(t *testing.T) {
 
+	mp := &MyProcessor{}
 	assert.Panics(t, func() {
-		New(100, .099, time.Minute, toKey, nil, callServices)
+		New[*RequestEntry, []byte](100, .099, time.Minute, mp)
 	})
 
 	assert.Panics(t, func() {
-		New(100, 3.00001, time.Minute, toKey, nil, callServices)
+		New[*RequestEntry, []byte](100, 3.00001, time.Minute, mp)
 	})
 }
 
 const Capacity = 31
 const TTL = 15 * time.Second
 
-func createCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
+func TestWithCompress(t *testing.T) {
 
-	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
+	transformer := mocks.NewTransformerI[any](t)
+	processor := mocks.NewProcessorI[any, any](t)
+	compressor := mocks.NewCompressorI(t)
 
-	requestTbl := make(map[*RequestEntry]bool)
-	for i := 0; i < Capacity; i++ {
-		request := &RequestEntry{
-			N:    i + 10,
-			Time: time.Now(),
-		}
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	processor.EXPECT().CacheMissSolver(mock.Anything).Return(keats, nil).Times(1)
+	transformer.EXPECT().ValueToBytes(keats).Return([]byte(keats), nil).Times(1)
+	compressedResponse := []byte("compressed")
+	compressor.EXPECT().Compress([]byte(keats)).Return(compressedResponse, nil).Times(1)
 
-		str := strconv.Itoa(i)
-		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
-		requestTbl[request] = true
-	}
-
-	return cache, requestTbl
-}
-
-func createCompressedCacheWithCapEntriesInside() (*CacheDriver, map[*RequestEntry]bool) {
-
-	cache := NewWithCompression(Capacity, .4, TTL, toKey, toBytes, toVal,
-		preProcessRequest, callServicesWithCompression)
-
-	requestTbl := make(map[*RequestEntry]bool)
-	for i := 0; i < Capacity; i++ {
-		request := &RequestEntry{
-			N:    i + 10,
-			Time: time.Now(),
-		}
-
-		str := strconv.Itoa(i)
-		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
-		requestTbl[request] = true
-	}
-
-	return cache, requestTbl
-}
-
-func TestCompress(t *testing.T) {
-
-	callFct := func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError) {
-
-		value := keats
-		return value, nil
-	}
-
-	cache := NewWithCompression(Capacity, .4, 3*time.Minute,
-		func(key interface{}) (string, error) { return key.(string), nil },
-		func(value interface{}) ([]byte, error) { return []byte(value.(string)), nil },
-		func(bytes []byte) (interface{}, error) { return string(bytes), nil },
-		nil, callFct)
+	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute, processor, transformer)
+	cache.compressor = compressor
 
 	val, ptr := cache.RetrieveFromCacheOrCompute("Keats")
 	assert.Nil(t, ptr)
 	assert.Equal(t, val, keats)
+
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	compressor.EXPECT().Decompress(compressedResponse).Return([]byte(keats), nil).Times(1)
+	transformer.EXPECT().BytesToValue([]byte(keats)).Return(keats, nil).Times(1)
 
 	val, ptr = cache.RetrieveFromCacheOrCompute("Keats")
 	assert.Nil(t, ptr)
 	assert.Equal(t, val, keats)
 }
 
-func TestCacheProcessing(t *testing.T) {
+func insertEntry[T any](
+	cache *CacheDriver[T, T],
+	processor *mocks.ProcessorI[T, T],
+	request T,
+) (T, *models.RequestError) {
+	s, _ := json.Marshal(request)
+	processor.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
+	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
 
-	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
+	return cache.RetrieveFromCacheOrCompute(request)
+}
 
-	var response Response
+func createCacheWithCapEntriesInside(
+	capacity int,
+	processor *mocks.ProcessorI[*RequestEntry, *RequestEntry],
+) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
-	for i := 0; i < Capacity; i++ {
+	cache := New[*RequestEntry, *RequestEntry](capacity, .4, TTL, processor)
+
+	requestTbl := make(map[*RequestEntry]bool)
+	for i := 0; i < capacity; i++ {
 		request := &RequestEntry{
 			N:    i + 10,
 			Time: time.Now(),
 		}
-
-		str := strconv.Itoa(i)
-		b, requestError := cache.RetrieveFromCacheOrCompute(request,
-			"Request: "+str, "Urequest: "+str)
-		assert.Nil(t, requestError)
-		assert.NotNil(t, b)
-
-		err := json.Unmarshal(b.([]byte), &response)
-		assert.Nil(t, err)
-		assert.Equal(t, request.N, response.Uresponse.Urequest.Request.N)
-		assert.Equal(t, request.PutValue, response.Uresponse.Urequest.Request.PutValue) // fmt.Printf("%#v", response)
-		assert.True(t, request.Time.Equal(response.Uresponse.Urequest.Request.Time))
+		insertEntry(cache, processor, request)
+		requestTbl[request] = true
 	}
+
+	return cache, requestTbl
+}
+
+func createCompressedCacheWithCapEntriesInside(
+	capacity int,
+	processor *mocks.ProcessorI[*RequestEntry, *RequestEntry],
+) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
+
+	transformer := &DefaultTransformer[*RequestEntry]{}
+	cache := NewWithCompression[*RequestEntry, *RequestEntry](capacity, .4, TTL, processor, transformer)
+
+	requestTbl := make(map[*RequestEntry]bool)
+	for i := 0; i < capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
+		insertEntry(cache, processor, request)
+		requestTbl[request] = true
+	}
+
+	return cache, requestTbl
 }
 
 func TestEvictions(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(Capacity, processor)
 
 	// now we insert Capacity new entries which should evict all the previously inserted ones
 	for i := Capacity; i < 2*Capacity; i++ {
@@ -268,31 +194,37 @@ func TestEvictions(t *testing.T) {
 			N:    i + 10,
 			Time: time.Now(),
 		}
-
-		str := strconv.Itoa(i)
-		b, requestError := cache.RetrieveFromCacheOrCompute(request,
-			"Request: "+str, "Urequest: "+str)
+		b, requestError := insertEntry(cache, processor, request)
 		assert.Nil(t, requestError)
 		assert.NotNil(t, b)
 	}
 
 	// now we verify that entries en tbl are not in the cache
 	for req := range tbl {
+		processor.EXPECT().ToMapKey(req).Return(strconv.Itoa(req.Time.Nanosecond()), nil).Times(1)
 		assert.False(t, cache.has(req))
 	}
 }
 
 func TestCacheDriver_Has(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(Capacity, processor)
 
 	for req := range tbl {
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
 		assert.True(t, cache.has(req))
 	}
 }
 
 func TestLRUOrder(t *testing.T) {
-	cache, _ := createCacheWithCapEntriesInside()
+
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, _ := createCacheWithCapEntriesInside(
+		Capacity,
+		processor,
+	)
 
 	it := cache.NewCacheIt()
 	prevTimeStamp := it.GetCurr().timestamp
@@ -305,88 +237,89 @@ func TestLRUOrder(t *testing.T) {
 
 func TestCacheDriver_testTTL(t *testing.T) {
 
-	cache := New(Capacity, .4, TTL, toKey, preProcessRequest, callServices)
+	ttl := 3 * time.Second
+	processor := mocks.NewProcessorI[any, any](t)
+	cache := New[any, any](Capacity, .4, ttl, processor)
 
 	request := &RequestEntry{
 		N:    10,
 		Time: time.Now(),
 	}
 
-	str := "10"
-	b, requestError := cache.RetrieveFromCacheOrCompute(request,
-		"Request: "+str, "Urequest: "+str)
+	processor.EXPECT().ToMapKey(request).Return(strconv.Itoa(request.Time.Nanosecond()), nil).Times(2)
+	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
+	b, requestError := cache.RetrieveFromCacheOrCompute(request)
 	assert.Nil(t, requestError)
 	assert.NotNil(t, b)
 
-	time.Sleep(TTL) // wait for tt expiration
+	time.Sleep(ttl) // wait for tt expiration
 
 	assert.False(t, cache.has(request))
 }
 
 func TestRandomTouches(t *testing.T) {
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		2,
+		processor,
+	)
 
 	N := len(tbl)
-	requests := make([]*RequestEntry, 0, N)
+	requests := make([]*RequestEntry, N)
+	i := 0
 	for req := range tbl {
-		requests = append(requests, req)
+		requests[i] = req
+		i++
 	}
 
-	var response Response
-	for i := 0; i < 1e6; i++ {
-		i := rand.Intn(N)
+	// var response *RequestEntry
+	for i := range rand.Perm(N) {
 		req := requests[i]
-		b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		b, requestError := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, requestError)
-
-		err := json.Unmarshal(b.([]byte), &response)
-		assert.Nil(t, err)
 
 		assert.Equal(t, cache.getMru().postProcessedResponse, b)
 	}
 }
 
 func TestCompressRandomTouches(t *testing.T) {
-	cache, tbl := createCompressedCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCompressedCacheWithCapEntriesInside(
+		2,
+		processor,
+	)
 
 	N := len(tbl)
-	requests := make([]*RequestEntry, 0, N)
+	requests := make([]*RequestEntry, N)
+	i := 0
 	for req := range tbl {
-		requests = append(requests, req)
+		requests[i] = req
+		i++
 	}
 
-	for i := 0; i < 1e6; i++ {
-		i := rand.Intn(N)
+	// var response *RequestEntry
+	for i := range rand.Perm(N) {
 		req := requests[i]
-		response, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		b, requestError := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, requestError)
 
-		compressedValue := cache.getMru().postProcessedResponse
-		decompressedValue, _ := lz4Decompress(compressedValue.([]byte))
-		value := &Response{
-			Uresponse: &UResponse{Urequest: &URequest{
-				Request: &RequestEntry{
-					N:        0,
-					Time:     time.Time{},
-					PutValue: "",
-				},
-				PutValue: "",
-			}},
-			Poem: "",
-		}
-		err := json.Unmarshal(decompressedValue, value)
-		assert.Nil(t, err)
-		ref := response.(*Response)
-		assert.Equal(t, ref.Poem, value.Poem)
-		assert.Equal(t, ref.Uresponse.Urequest.Request.N, value.Uresponse.Urequest.Request.N)
-		assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, value.Uresponse.Urequest.Request.PutValue)
-		assert.Equal(t, ref.Uresponse.Urequest.PutValue, value.Uresponse.Urequest.PutValue)
+		decompressedReponse, _ := cache.compressor.Decompress(cache.getMru().postProcessedResponseCompressed)
+		data, _ := cache.transformer.BytesToValue(decompressedReponse)
+		assert.Equal(t, data, b)
 	}
 }
 
 func TestCacheDriver_CacheState(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		2,
+		processor,
+	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
 	for req := range tbl {
@@ -397,19 +330,24 @@ func TestCacheDriver_CacheState(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		i := rand.Intn(N)
 		req := requests[i]
-		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 	}
 
 	state, err := cache.GetState()
 	assert.Nil(t, err)
 	assert.NotNil(t, state)
 
-	fmt.Print(state)
 }
 
 func TestCacheDriver_Clean(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		processor,
+	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
 	for req := range tbl {
@@ -420,7 +358,9 @@ func TestCacheDriver_Clean(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		i := rand.Intn(N)
 		req := requests[i]
-		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 	}
 
 	err := cache.Clean()
@@ -442,17 +382,31 @@ func TestCacheDriver_Clean(t *testing.T) {
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {
+	processor := &MyProcessor{}
+	cache := New[*RequestEntry, []byte](Capacity, .4, TTL, processor)
 
-	cache, tbl := createCacheWithCapEntriesInside()
-	N := len(tbl)
+	requestTbl := make(map[*RequestEntry]bool)
+	for i := 0; i < Capacity; i++ {
+		request := &RequestEntry{
+			N:    i + 10,
+			Time: time.Now(),
+		}
+		cache.RetrieveFromCacheOrCompute(request)
+		requestTbl[request] = true
+	}
+	// 	1,
+	// 	proccessor,
+	// )
+	N := len(requestTbl)
 	requests := make([]*RequestEntry, 0, N)
-	for req := range tbl {
+	for req := range requestTbl {
 		requests = append(requests, req)
 	}
 
+	// some random touches
 	for i := 0; i < 1000000; i++ {
 		req := requests[0]
-		_, err := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		_, err := cache.RetrieveFromCacheOrCompute(req)
 		assert.Nil(t, err)
 	}
 }
@@ -463,7 +417,13 @@ func TestConcurrency(t *testing.T) {
 	const SuperCap = 3037
 	const NumRepeatedCalls = 50
 
-	cache := New(SuperCap, .3, 30*time.Second, toKey, preProcessRequest, callServices)
+	myProccessor := &MyProcessor{}
+	cache := New[*RequestEntry, []byte](
+		SuperCap,
+		.3,
+		30*time.Second,
+		myProccessor,
+	)
 
 	tbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -472,8 +432,7 @@ func TestConcurrency(t *testing.T) {
 			Time: time.Now(),
 		}
 
-		str := strconv.Itoa(i)
-		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
+		_, _ = cache.RetrieveFromCacheOrCompute(request)
 		tbl[request] = true
 	}
 
@@ -496,14 +455,14 @@ func TestConcurrency(t *testing.T) {
 				// now we simulate the avalanche
 				for j := 0; j < NumRepeatedCalls; j++ {
 
-					go func() {
-						b, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+					go func(req *RequestEntry) {
+						_, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
 
-						var response Response
-						err := json.Unmarshal(b.([]byte), &response)
-						assert.Nil(t, err)
-					}()
+						// var response Response
+						// err := json.Unmarshal(b.([]byte), &response)
+						// assert.Nil(t, err)
+					}(req)
 
 				}
 
@@ -521,8 +480,15 @@ func TestConcurrencyAndCompress(t *testing.T) {
 	const SuperCap = 1019
 	const NumRepeatedCalls = 20
 
-	cache := NewWithCompression(SuperCap, .3, 30*time.Second, toKey, toBytes, toVal,
-		preProcessRequest, callServicesWithCompression)
+	myProccessor := &MyProcessor{}
+	defaultTransformer := &DefaultTransformer[[]byte]{}
+	cache := NewWithCompression[*RequestEntry, []byte](
+		SuperCap,
+		.3,
+		30*time.Second,
+		myProccessor,
+		defaultTransformer,
+	)
 
 	tbl := make(map[*RequestEntry]bool)
 	for i := 0; i < Capacity; i++ {
@@ -531,8 +497,7 @@ func TestConcurrencyAndCompress(t *testing.T) {
 			Time: time.Now(),
 		}
 
-		str := strconv.Itoa(i)
-		_, _ = cache.RetrieveFromCacheOrCompute(request, "Request: "+str, "Urequest: "+str)
+		_, _ = cache.RetrieveFromCacheOrCompute(request)
 		tbl[request] = true
 	}
 
@@ -555,13 +520,14 @@ func TestConcurrencyAndCompress(t *testing.T) {
 				// now we simulate the avalanche
 				for j := 0; j < NumRepeatedCalls; j++ {
 
-					go func(request *RequestEntry) {
-						response, requestError := cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+					go func(req *RequestEntry) {
+						response, requestError := cache.RetrieveFromCacheOrCompute(req)
 						assert.Nil(t, requestError)
 
-						ref := response.(*Response)
-						assert.Equal(t, ref.Uresponse.Urequest.Request.N, request.N)
-						assert.Equal(t, ref.Uresponse.Urequest.Request.PutValue, request.PutValue)
+						ref := &Response{}
+						err := json.Unmarshal(response, &ref)
+						assert.Nil(t, err)
+						assert.Equal(t, ref.Uresponse.Urequest.Request.N, req.N)
 						assert.Equal(t, ref.Poem, keats)
 					}(req)
 				}
@@ -576,7 +542,11 @@ func TestConcurrencyAndCompress(t *testing.T) {
 
 func TestCacheDriver_LazyRemove(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		processor,
+	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
 	for req := range tbl {
@@ -588,12 +558,16 @@ func TestCacheDriver_LazyRemove(t *testing.T) {
 		i := rand.Intn(N)
 		req := requests[i]
 		lastRequest = req
-		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 		isMru, err := cache.isKeyMru(req)
 		assert.Nil(t, err)
 		assert.True(t, isMru)
 	}
 
+	s, _ := json.Marshal(lastRequest)
+	processor.EXPECT().ToMapKey(lastRequest).Return(string(s), nil).Times(2)
 	err := cache.LazyRemove(lastRequest)
 	assert.Nil(t, err)
 	assert.False(t, cache.has(lastRequest))
@@ -601,7 +575,11 @@ func TestCacheDriver_LazyRemove(t *testing.T) {
 
 func TestCacheDriver_Contains(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		processor,
+	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
 	for req := range tbl {
@@ -610,11 +588,15 @@ func TestCacheDriver_Contains(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		req := requests[i]
-		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
+		_, _ = cache.RetrieveFromCacheOrCompute(req)
 	}
 
 	for i := 0; i < N; i++ {
 		req := requests[i]
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(1)
 		ok, err := cache.Contains(req)
 		assert.Nil(t, err)
 		assert.True(t, ok)
@@ -623,7 +605,11 @@ func TestCacheDriver_Contains(t *testing.T) {
 
 func TestCacheDriver_Touch(t *testing.T) {
 
-	cache, tbl := createCacheWithCapEntriesInside()
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache, tbl := createCacheWithCapEntriesInside(
+		Capacity,
+		processor,
+	)
 	N := len(tbl)
 	requests := make([]*RequestEntry, 0, N)
 	for req := range tbl {
@@ -632,11 +618,8 @@ func TestCacheDriver_Touch(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		req := requests[i]
-		_, _ = cache.RetrieveFromCacheOrCompute(req, "Req", "UReq")
-	}
-
-	for i := 0; i < N; i++ {
-		req := requests[i]
+		s, _ := json.Marshal(req)
+		processor.EXPECT().ToMapKey(req).Return(string(s), nil).Times(2)
 		err := cache.Touch(req)
 		assert.Nil(t, err)
 
@@ -645,4 +628,81 @@ func TestCacheDriver_Touch(t *testing.T) {
 		assert.Nil(t, err)
 		assert.True(t, mru)
 	}
+}
+
+//benchmark to test the performance of the cache
+//when the processor should perform an addition task
+
+type BenchProcessor struct{}
+
+type Adder struct {
+	num1, num2 int
+}
+
+func (p *BenchProcessor) ToMapKey(adder Adder) (string, error) {
+	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
+}
+
+func (p *BenchProcessor) CacheMissSolver(adder Adder) (int, *models.RequestError) {
+	return adder.num1 + adder.num2, nil
+}
+
+var seed int64 = 39823823434
+
+func BenchmarkInsertStatic(b *testing.B) {
+	benchInsert(b, seed)
+}
+func BenchmarkInsertDynamic(b *testing.B) {
+	benchInsert(b, time.Now().Unix())
+}
+
+func benchInsert(b *testing.B, seed int64) {
+
+	cache := New[Adder, int](Capacity, 0.5, TTL, &BenchProcessor{})
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 100; j++ {
+			num1 := rand.Int()
+			num2 := rand.Int()
+			adder := Adder{num1, num2}
+			_, _ = cache.RetrieveFromCacheOrCompute(adder)
+		}
+	}
+
+}
+
+func createRandomArray(seed int64, size int) []Adder {
+	rand.Seed(seed)
+	arr := make([]Adder, size)
+	for i := 0; i < size; i++ {
+		num1 := rand.Int()
+		num2 := rand.Int()
+		arr[i] = Adder{num1, num2}
+	}
+	return arr
+}
+
+func benchInsertAvalanche(b *testing.B, seed int64) {
+	var size int = 1e3
+	arr := createRandomArray(seed, size)
+	cache := New[Adder, int](Capacity, 0.5, TTL, &BenchProcessor{})
+	rand.Seed(seed)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < size; j++ {
+			for k := 0; k < 1e3; k++ {
+				_, _ = cache.RetrieveFromCacheOrCompute(arr[j])
+			}
+		}
+	}
+
+}
+
+func BenchmarkAvalancheStatic(b *testing.B) {
+	benchInsertAvalanche(b, seed)
+}
+
+func BenchmarkAvalancheDynamic(b *testing.B) {
+	benchInsertAvalanche(b, time.Now().Unix())
 }

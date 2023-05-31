@@ -7,11 +7,13 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/geniussportsgroup/gateway_cache/models"
 )
 
 // State that a cache entry could have
 const (
-	AVAILABLE = iota
+	AVAILABLE models.EntryState = iota
 	COMPUTING
 	COMPUTED
 	FAILED5xx
@@ -20,7 +22,7 @@ const (
 )
 
 const (
-	Status4xx = iota
+	Status4xx models.CodeStatus = iota
 	Status4xxCached
 	Status5xx
 	Status5xxCached
@@ -28,78 +30,75 @@ const (
 )
 
 // CacheEntry Every cache entry has this information
-type CacheEntry struct {
-	cacheKey              string     // key stringficated; needed for removal operation
-	lock                  sync.Mutex // lock for repeated requests
-	cond                  *sync.Cond // used in conjunction with the lock for repeated request until result is ready
-	postProcessedResponse interface{}
-	timestamp             time.Time // Last time accessed
-	expirationTime        time.Time
-	prev                  *CacheEntry
-	next                  *CacheEntry
-	state                 int8 // AVAILABLE, COMPUTING, etc
-	err                   error
+type CacheEntry[K any] struct {
+	cacheKey                        string     // key stringficated; needed for removal operation
+	lock                            sync.Mutex // lock for repeated requests
+	cond                            *sync.Cond // used in conjunction with the lock for repeated request until result is ready
+	postProcessedResponse           K
+	postProcessedResponseCompressed []byte
+	timestamp                       time.Time // Last time accessed
+	expirationTime                  time.Time
+	prev                            *CacheEntry[K]
+	next                            *CacheEntry[K]
+	state                           models.EntryState // AVAILABLE, COMPUTING, etc
+	err                             error
 }
 
-type RequestError struct {
-	Error    error
-	Code     int
-	UserCode int
-	// TODO: add UserInfo as a kind of opaque data pointer. In that way, the user can return to the invoker any kind of additional data
+// CacheDriver The cache itself.
+//
+// K represents the request's type this will be used as key.
+//
+// T the response's type this will be used as value.
+type CacheDriver[K any, T any] struct {
+	table            map[string]*CacheEntry[T]
+	missCount        int
+	hitCount         int
+	ttl              time.Duration
+	head             CacheEntry[T] // sentinel header node
+	lock             sync.Mutex
+	capacity         int
+	extendedCapacity int
+	numEntries       int
+	toCompress       bool
+	processor        ProcessorI[K, T]
+	transformer      TransformerI[T]
+	compressor       CompressorI
 }
 
-type CacheDriver struct {
-	table             map[string]*CacheEntry
-	missCount         int
-	hitCount          int
-	ttl               time.Duration
-	head              CacheEntry // sentinel header node
-	lock              sync.Mutex
-	capacity          int
-	extendedCapacity  int
-	numEntries        int
-	toCompress        bool
-	toMapKey          func(key interface{}) (string, error)
-	valueToBytes      func(value interface{}) ([]byte, error)
-	bytesToValue      func([]byte) (interface{}, error)
-	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError)
-	callUServices     func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError)
-}
-
-func (cache *CacheDriver) MissCount() int {
+func (cache *CacheDriver[T, K]) MissCount() int {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 	return cache.missCount
 }
 
-func (cache *CacheDriver) HitCount() int {
+func (cache *CacheDriver[T, K]) HitCount() int {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 	return cache.hitCount
 }
 
-func (cache *CacheDriver) Ttl() time.Duration {
+func (cache *CacheDriver[T, K]) Ttl() time.Duration {
 	return cache.ttl
 }
 
-func (cache *CacheDriver) Capacity() int {
+func (cache *CacheDriver[T, K]) Capacity() int {
 	return cache.capacity
 }
 
-func (cache *CacheDriver) ExtendedCapacity() int {
+func (cache *CacheDriver[T, K]) ExtendedCapacity() int {
 	return cache.extendedCapacity
 }
 
-func (cache *CacheDriver) NumEntries() int {
+func (cache *CacheDriver[T, K]) NumEntries() int {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 	return cache.numEntries
 }
 
 // LazyRemove removes the entry with keyVal from the cache. It does not remove the entry immediately, but it marks it as	removed.
-func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
+func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.processor.ToMapKey(keyVal)
 	if err != nil {
 		return err
 	}
@@ -112,7 +111,7 @@ func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
 		defer entry.lock.Unlock()
 
 		if entry.expirationTime.Before(time.Now()) {
-			return fmt.Errorf("entry expired")
+			return ErrEntryExpired
 		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
@@ -126,10 +125,10 @@ func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
 		}
 
 		if entry.state == AVAILABLE {
-			return fmt.Errorf("entry is available state")
+			return ErrEntryAvailableState
 		}
 
-		return fmt.Errorf("entry is computing state")
+		return ErrEntryComputingState
 	}
 
 	cache.lock.Unlock()
@@ -137,9 +136,9 @@ func (cache *CacheDriver) LazyRemove(keyVal interface{}) error {
 	return nil
 }
 
-func (cache *CacheDriver) Touch(keyVal interface{}) error {
+func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.processor.ToMapKey(keyVal)
 	if err != nil {
 		return err
 	}
@@ -153,7 +152,7 @@ func (cache *CacheDriver) Touch(keyVal interface{}) error {
 
 		currentTime := time.Now()
 		if entry.expirationTime.Before(currentTime) {
-			return fmt.Errorf("entry expired")
+			return ErrEntryExpired
 		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
@@ -167,10 +166,10 @@ func (cache *CacheDriver) Touch(keyVal interface{}) error {
 		}
 
 		if entry.state == AVAILABLE {
-			return fmt.Errorf("entry is available state")
+			return ErrEntryAvailableState
 		}
 
-		return fmt.Errorf("entry is computing state")
+		return ErrEntryComputingState
 	}
 
 	cache.lock.Unlock()
@@ -179,9 +178,9 @@ func (cache *CacheDriver) Touch(keyVal interface{}) error {
 }
 
 // Contains returns true if the cache contains keyVal. It does not update the entry timestamp and consequently it does not change the eviction order.
-func (cache *CacheDriver) Contains(keyVal interface{}) (bool, error) {
+func (cache *CacheDriver[T, K]) Contains(keyVal T) (bool, error) {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.processor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -213,18 +212,20 @@ func (cache *CacheDriver) Contains(keyVal interface{}) (bool, error) {
 //
 // ttl: time to live of a cache entry
 //
-// toMapKey is a function in charge of transforming the request into a string
+// processor: is an interface that must be implemented by the user. It is in charge of transforming the request
+// into a string and get the value in case that does not exist in the cache
 //
-// preProcessRequest is an optional function that could be used for validation, transforming
-// the request in a more suitable form, etc.
-//
-// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
-// service response
-func New(capacity int, capFactor float64, ttl time.Duration,
-	toMapKey func(key interface{}) (string, error),
-	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
-	callUServices func(request, payload interface{}, other ...interface{}) (interface{}, *RequestError),
-) *CacheDriver {
+//	type ProcessorI[K any, T any] interface {
+//		ToMapKey(keyVal T) (string, error) //Is the function in charge of transforming the request into a string
+//		CacheMissSolver(K) (T, *models.RequestError)  //Is the function in charge of getting the value in case that does not exist in the cache
+//	}
+func New[K any, T any](
+	capacity int,
+	capFactor float64,
+	ttl time.Duration,
+	processor ProcessorI[K, T],
+
+) *CacheDriver[K, T] {
 
 	if capFactor < 0.1 || capFactor > 3.0 {
 		panic(fmt.Sprintf("invalid capFactor %f. It should be in [0.1, 3]",
@@ -232,17 +233,16 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 	}
 
 	extendedCapacity := math.Ceil((1.0 + capFactor) * float64(capacity))
-	ret := &CacheDriver{
-		missCount:         0,
-		hitCount:          0,
-		capacity:          capacity,
-		extendedCapacity:  int(extendedCapacity),
-		numEntries:        0,
-		ttl:               ttl,
-		table:             make(map[string]*CacheEntry, int(extendedCapacity)),
-		toMapKey:          toMapKey,
-		preProcessRequest: preProcessRequest,
-		callUServices:     callUServices,
+	ret := &CacheDriver[K, T]{
+		missCount:        0,
+		hitCount:         0,
+		capacity:         capacity,
+		extendedCapacity: int(extendedCapacity),
+		numEntries:       0,
+		ttl:              ttl,
+		table:            make(map[string]*CacheEntry[T], int(extendedCapacity)),
+		processor:        processor,
+		compressor:       lz4Compressor{},
 	}
 	ret.head.prev = &ret.head
 	ret.head.next = &ret.head
@@ -259,7 +259,7 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 // second function, bytesToValue, takes a serialized representation of the value stored into the
 // cache, and it transforms it to the original representation.
 //
-// Parameters are:
+// The parameters are:
 //
 // capacity: maximum number of entries that cache can manage without evicting the least recently used
 //
@@ -267,47 +267,64 @@ func New(capacity int, capFactor float64, ttl time.Duration,
 //
 // ttl: time to live of a cache entry
 //
-// toMapKey is a function in charge of transforming the request into a string
+// processor: is an interface that must be implemented by the user. It is in charge of transforming the request
+// into a string and get the value in case that does not exist in the cache
 //
-// valueToBytes transforms the value into a []byte
+//	type ProcessorI[K any, T any] interface {
+//		ToMapKey(keyVal T) (string, error) //Is the function in charge of transforming the request into a string
+//		CacheMissSolver(K) (T, *models.RequestError)  //Is the function in charge of getting the value in case that does not exist in the cache
+//	}
 //
-// bytesToValue transforms a []byte into the original value representation
+// transformer: is an interface that must be implemented by the user. It is in charge of transforming the value
+// into a byte slice and vice versa
 //
-// valueToBytes
+//	type Transformer[T any] interface {
+//		ValueToBytes(T) ([]byte, error)
+//		BytesToValue([]byte) (T, error)
+//	}
 //
-// preProcessRequest is an optional function that could be used for validation, transforming
-// the request in a more suitable form, etc.
+// it is a default implementation of the transformer interface that you can use
 //
-// callUService: is responsible for calling to the service and building a byte sequence corresponding to the
-// service response
-func NewWithCompression(capacity int, capFactor float64, ttl time.Duration,
-	toMapKey func(key interface{}) (string, error),
-	valueToBytes func(value interface{}) ([]byte, error),
-	bytesToValue func([]byte) (interface{}, error),
-	preProcessRequest func(request interface{}, other ...interface{}) (interface{}, *RequestError),
-	callUServices func(request, payload interface{},
-		other ...interface{}) (interface{}, *RequestError),
-) (cache *CacheDriver) {
+//	type DefaultTransformer[T any] struct{}
+//
+//	func (_ *DefaultTransformer[T]) BytesToValue(in []byte) (T, error) {
+//		var out T
+//		err := json.Unmarshal(in, &out)
+//		if err != nil {
+//			return out, err
+//		}
+//		return out, nil
+//	}
+//
+//	func (_ *DefaultTransformer[T]) ValueToBytes(in T) ([]byte, error) {
+//			return json.Marshal(in)
+//		}
+func NewWithCompression[T any, K any](
+	capacity int,
+	capFactor float64,
+	ttl time.Duration,
+	processor ProcessorI[T, K],
+	compressor TransformerI[K],
+) (cache *CacheDriver[T, K]) {
 
-	cache = New(capacity, capFactor, ttl, toMapKey, preProcessRequest, callUServices)
+	cache = New(capacity, capFactor, ttl, processor)
 	if cache != nil {
 		cache.toCompress = true
-		cache.valueToBytes = valueToBytes
-		cache.bytesToValue = bytesToValue
+		cache.transformer = compressor
 	}
 
 	return cache
 }
 
 // Insert entry as the first item of cache (mru)
-func (cache *CacheDriver) insertAsMru(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) insertAsMru(entry *CacheEntry[K]) {
 	entry.prev = &cache.head
 	entry.next = cache.head.next
 	cache.head.next.prev = entry
 	cache.head.next = entry
 }
 
-func (cache *CacheDriver) insertAsLru(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) insertAsLru(entry *CacheEntry[K]) {
 	entry.prev = cache.head.prev
 	entry.next = &cache.head
 	cache.head.prev.next = entry
@@ -315,22 +332,21 @@ func (cache *CacheDriver) insertAsLru(entry *CacheEntry) {
 }
 
 // Auto deletion of lru queue
-func (entry *CacheEntry) selfDeleteFromLRUList() {
+func (entry *CacheEntry[T]) selfDeleteFromLRUList() {
 	entry.prev.next = entry.next
 	entry.next.prev = entry.prev
 }
 
-func (cache *CacheDriver) isLru(entry *CacheEntry) bool {
+func (cache *CacheDriver[T, K]) isLru(entry *CacheEntry[K]) bool {
 	return entry.next == &cache.head
 }
 
-func (cache *CacheDriver) isMru(entry *CacheEntry) bool {
+func (cache *CacheDriver[T, K]) isMru(entry *CacheEntry[K]) bool {
 	return entry.prev == &cache.head
 }
 
-func (cache *CacheDriver) isKeyLru(keyVal interface{}) (bool, error) {
-
-	key, err := cache.toMapKey(keyVal)
+func (cache *CacheDriver[T, K]) isKeyLru(keyVal T) (bool, error) {
+	key, err := cache.processor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
@@ -342,36 +358,36 @@ func (cache *CacheDriver) isKeyLru(keyVal interface{}) (bool, error) {
 	return false, nil
 }
 
-func (cache *CacheDriver) isKeyMru(keyVal interface{}) (bool, error) {
+func (cache *CacheDriver[T, K]) isKeyMru(keyVal T) (bool, error) {
 
-	key, err := cache.toMapKey(keyVal)
+	key, err := cache.processor.ToMapKey(keyVal)
 	if err != nil {
 		return false, err
 	}
 
-	if entry, ok := cache.table[key]; ok {
+	if entry, ok := cache.table[key]; ok && entry.expirationTime.After(time.Now()) {
 		return cache.isMru(entry), nil
 	}
 
 	return false, nil
 }
 
-func (cache *CacheDriver) becomeMru(entry *CacheEntry) {
+// func (cache *CacheDriver[T, K]) becomeMru(entry *CacheEntry[K]) {
+func (cache *CacheDriver[T, K]) becomeMru(entry *CacheEntry[K]) {
 	entry.selfDeleteFromLRUList()
 	cache.insertAsMru(entry)
 }
 
-func (cache *CacheDriver) becomeLru(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) becomeLru(entry *CacheEntry[K]) {
 	entry.selfDeleteFromLRUList()
 	cache.insertAsLru(entry)
 }
 
 // Rewove the last item in the list (lru); mutex must be taken. The entry becomes AVAILABLE
-func (cache *CacheDriver) evictLruEntry() (*CacheEntry, error) {
+func (cache *CacheDriver[T, K]) evictLruEntry() (*CacheEntry[K], error) {
 	entry := cache.head.prev // <-- LRU entry
 	if entry.state == COMPUTING {
-		err := errors.New("LRU entry is in COMPUTING state. This could be a bug or a cache misconfiguration")
-		return nil, err
+		return nil, ErrLRUComputing
 	}
 	entry.selfDeleteFromLRUList()
 	cache.table[entry.cacheKey] = nil
@@ -379,8 +395,9 @@ func (cache *CacheDriver) evictLruEntry() (*CacheEntry, error) {
 	return entry, nil
 }
 
-func (cache *CacheDriver) allocateEntry(cacheKey string,
-	currTime time.Time) (entry *CacheEntry, err error) {
+func (cache *CacheDriver[T, K]) allocateEntry(
+	cacheKey string,
+	currTime time.Time) (entry *CacheEntry[K], err error) {
 
 	if cache.numEntries == cache.capacity {
 		entry, err = cache.evictLruEntry()
@@ -388,7 +405,7 @@ func (cache *CacheDriver) allocateEntry(cacheKey string,
 			return nil, err
 		}
 	} else {
-		entry = new(CacheEntry)
+		entry = new(CacheEntry[K])
 		entry.cond = sync.NewCond(&entry.lock)
 		cache.numEntries++
 	}
@@ -397,7 +414,8 @@ func (cache *CacheDriver) allocateEntry(cacheKey string,
 	entry.state = AVAILABLE
 	entry.timestamp = currTime
 	entry.expirationTime = currTime.Add(cache.ttl)
-	entry.postProcessedResponse = nil // should dispose any allocated result
+	var zeroK K
+	entry.postProcessedResponse = zeroK // should dispose any allocated result
 	cache.table[cacheKey] = entry
 	return entry, nil
 }
@@ -406,30 +424,21 @@ func (cache *CacheDriver) allocateEntry(cacheKey string,
 // immediately returns the cached entry. If the request is the first, then it blocks until the result is
 // ready. If the request is not the first but the result is not still ready, then it blocks
 // until the result is ready
-func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
-	other ...interface{}) (interface{}, *RequestError) {
+func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *models.RequestError) {
 
-	var requestError *RequestError
+	var requestError *models.RequestError
+	var zeroK K
+	payload := request
 
-	var payload interface{}
-	if cache.preProcessRequest != nil {
-		payload, requestError = cache.preProcessRequest(request, other...)
-		if requestError != nil {
-			return nil, requestError
-		}
-	} else {
-		payload = request
-	}
-
-	cacheKey, err := cache.toMapKey(payload)
+	cacheKey, err := cache.processor.ToMapKey(payload)
 	if err != nil {
-		return nil, &RequestError{
+		return zeroK, &models.RequestError{
 			Error: err,
 			Code:  Status4xx,
 		}
 	}
 
-	var entry *CacheEntry
+	var entry *CacheEntry[K]
 	var hit bool
 	currTime := time.Now()
 	cache.lock.Lock()
@@ -448,12 +457,12 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		}
 		defer entry.lock.Unlock()
 		if entry.state == FAILED5xx {
-			return nil, &RequestError{
+			return zeroK, &models.RequestError{
 				Error: entry.err,
 				Code:  Status5xxCached, // include 4xx and 5xx
 			}
 		} else if entry.state == FAILED4xx {
-			return nil, &RequestError{
+			return zeroK, &models.RequestError{
 				Error: entry.err,
 				Code:  Status4xxCached, // include 4xx and 5xx
 			}
@@ -462,16 +471,18 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 		entry.expirationTime = currTime.Add(cache.ttl)
 
 		if withCompression {
-			buf, err := lz4Decompress(entry.postProcessedResponse.([]byte))
+
+			buf, err := cache.compressor.Decompress(entry.postProcessedResponseCompressed)
 			if err != nil {
-				return nil, &RequestError{
+				return zeroK, &models.RequestError{
 					Error: errors.New("cannot decompress stored message"),
 					Code:  Status5xx, // include 4xx and 5xx
 				}
 			}
-			result, err := cache.bytesToValue(buf)
+
+			result, err := cache.transformer.BytesToValue(buf)
 			if err != nil {
-				return nil, &RequestError{
+				return zeroK, &models.RequestError{
 					Error: errors.New("cannot convert decompressed stored message"),
 					Code:  Status5xx, // include 4xx and 5xx
 				}
@@ -487,7 +498,8 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	entry, err = cache.allocateEntry(cacheKey, currTime)
 	if err != nil {
 		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
-		return cache.callUServices(request, payload, other...)
+		// return cache.callUServices(request, payload, other...)
+		return cache.processor.CacheMissSolver(request)
 	}
 
 	entry.state = COMPUTING
@@ -498,13 +510,12 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
 	defer entry.lock.Unlock()
 
-	var retVal interface{} = nil // Explicit initialization for understanding flow!
-	retVal, requestError = cache.callUServices(request, payload, other...)
+	retVal, requestError := cache.processor.CacheMissSolver(request)
 	if requestError != nil {
-		switch {
-		case requestError.Code == Status4xx || requestError.Code == Status4xxCached:
+		switch requestError.Code {
+		case Status4xx, Status4xxCached:
 			entry.state = FAILED4xx
-		case requestError.Code == Status5xx || requestError.Code == Status5xxCached:
+		case Status5xx, Status5xxCached:
 			entry.state = FAILED5xx
 		default:
 			entry.state = FAILED5XXMISSHANDLERERROR
@@ -515,26 +526,27 @@ func (cache *CacheDriver) RetrieveFromCacheOrCompute(request interface{},
 	}
 
 	if withCompression {
-		buf, err := cache.valueToBytes(retVal) // transforms retVal into a []byte ready for compression
+		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
 			entry.state = FAILED5xx
 		}
-		lz4Buf, err := lz4Compress(buf)
+		lz4Buf, err := cache.compressor.Compress(buf)
 		if err != nil {
 			entry.state = FAILED5xx
+			entry.postProcessedResponse = retVal
+		} else {
+			entry.postProcessedResponseCompressed = lz4Buf
 		}
-		entry.postProcessedResponse = lz4Buf // stores the compressed representation
-	} else {
-		entry.postProcessedResponse = retVal
 	}
 
+	entry.postProcessedResponse = retVal
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
 	return retVal, requestError
 }
 
 // remove entry from cache.Mutex must be taken
-func (cache *CacheDriver) remove(entry *CacheEntry) {
+func (cache *CacheDriver[T, K]) remove(entry *CacheEntry[K]) {
 	entry.selfDeleteFromLRUList()
 	cache.table[entry.cacheKey] = nil
 	delete(cache.table, entry.cacheKey)
@@ -542,8 +554,9 @@ func (cache *CacheDriver) remove(entry *CacheEntry) {
 }
 
 // has return true is state in the cache
-func (cache *CacheDriver) has(val interface{}) bool {
-	key, err := cache.toMapKey(val)
+func (cache *CacheDriver[T, K]) has(val T) bool {
+	key, err := cache.processor.ToMapKey(val)
+	// key, err := cache.toMapKey(val)
 	if err != nil {
 		return false
 	}
@@ -552,7 +565,7 @@ func (cache *CacheDriver) has(val interface{}) bool {
 }
 
 // Return the lru without moving it from the queue
-func (cache *CacheDriver) getLru() *CacheEntry {
+func (cache *CacheDriver[T, K]) getLru() *CacheEntry[K] {
 	if cache.numEntries == 0 {
 		return nil
 	}
@@ -560,7 +573,7 @@ func (cache *CacheDriver) getLru() *CacheEntry {
 }
 
 // Return the mru without moving it from the queue
-func (cache *CacheDriver) getMru() *CacheEntry {
+func (cache *CacheDriver[T, K]) getMru() *CacheEntry[K] {
 	if cache.numEntries == 0 {
 		return nil
 	}
@@ -568,24 +581,24 @@ func (cache *CacheDriver) getMru() *CacheEntry {
 }
 
 // CacheIt Iterator on cache entries. Go from MUR to LRU
-type CacheIt struct {
-	cachePtr *CacheDriver
-	curr     *CacheEntry
+type CacheIt[T any, K any] struct {
+	cachePtr *CacheDriver[T, K]
+	curr     *CacheEntry[K]
 }
 
-func (cache *CacheDriver) NewCacheIt() *CacheIt {
-	return &CacheIt{cachePtr: cache, curr: cache.head.next}
+func (cache *CacheDriver[T, K]) NewCacheIt() *CacheIt[T, K] {
+	return &CacheIt[T, K]{cachePtr: cache, curr: cache.head.next}
 }
 
-func (it *CacheIt) HasCurr() bool {
+func (it *CacheIt[T, K]) HasCurr() bool {
 	return it.curr != &it.cachePtr.head
 }
 
-func (it *CacheIt) GetCurr() *CacheEntry {
+func (it *CacheIt[T, K]) GetCurr() *CacheEntry[K] {
 	return it.curr
 }
 
-func (it *CacheIt) Next() *CacheEntry {
+func (it *CacheIt[T, K]) Next() *CacheEntry[K] {
 	if !it.HasCurr() {
 		return nil
 	}
@@ -602,7 +615,7 @@ type CacheState struct {
 }
 
 // GetState Return a json containing the cache state. Use the internal mutex. Be careful with a deadlock
-func (cache *CacheDriver) GetState() (string, error) {
+func (cache *CacheDriver[T, K]) GetState() (string, error) {
 
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
@@ -623,12 +636,13 @@ func (cache *CacheDriver) GetState() (string, error) {
 }
 
 // helper that does not take lock
-func (cache *CacheDriver) clean() error {
+func (cache *CacheDriver[T, K]) clean() error {
 
 	for it := cache.NewCacheIt(); it.HasCurr(); it.Next() {
 		entry := it.GetCurr()
 		if entry.state == COMPUTING {
-			return errors.New("cannot clean cache because a entry was found waiting for response")
+			return ErrEntryComputingState
+			// return errors.New("cannot clean cache because a entry was found waiting for response")
 		}
 	}
 
@@ -649,7 +663,7 @@ func (cache *CacheDriver) clean() error {
 // state.
 //
 // Uses internal lock
-func (cache *CacheDriver) Clean() error {
+func (cache *CacheDriver[T, K]) Clean() error {
 
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
@@ -657,14 +671,14 @@ func (cache *CacheDriver) Clean() error {
 	return cache.clean()
 }
 
-func (cache *CacheDriver) Set(capacity int, ttl time.Duration) error {
+func (cache *CacheDriver[T, K]) Set(capacity int, ttl time.Duration) error {
 
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 
 	if capacity != 0 {
 		if cache.numEntries > capacity {
-			return errors.New("number of entries in the cache is greater than given capacity")
+			return ErrNumOfEntriesBiggerThanCapacity
 		}
 		cache.capacity = capacity
 	}
