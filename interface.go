@@ -3,7 +3,7 @@ package gw_cache
 import (
 	"encoding/json"
 
-	"github.com/geniussportsgroup/gateway_cache/models"
+	"github.com/geniussportsgroup/gateway_cache/v2/models"
 )
 
 // ProcessorI is the interface used to map the key and get the value in case it is missing.

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/geniussportsgroup/gateway_cache/mocks"
+	"github.com/geniussportsgroup/gateway_cache/v2/mocks"
 
-	"github.com/geniussportsgroup/gateway_cache/models"
+	"github.com/geniussportsgroup/gateway_cache/v2/models"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 )

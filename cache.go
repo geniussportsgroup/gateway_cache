@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/geniussportsgroup/gateway_cache/models"
+	"github.com/geniussportsgroup/gateway_cache/v2/models"
 )
 
 // State that a cache entry could have

@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	gw_cache "github.com/geniussportsgroup/gateway_cache"
-	"github.com/geniussportsgroup/gateway_cache/models"
+	gw_cache "github.com/geniussportsgroup/gateway_cache/v2"
+	"github.com/geniussportsgroup/gateway_cache/v2/models"
 )
 
 type Processor struct {
