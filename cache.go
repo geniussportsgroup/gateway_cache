@@ -177,33 +177,6 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 	return nil
 }
 
-// Contains returns true if the cache contains keyVal. It does not update the entry timestamp and consequently it does not change the eviction order.
-// func (cache *CacheDriver[T, K]) Contains(keyVal T) (bool, error) {
-
-// 	key, err := cache.processor.ToMapKey(keyVal)
-// 	if err != nil {
-// 		return false, err
-// 	}
-
-// 	cache.lock.Lock()
-
-// 	if entry, ok := cache.table[key]; ok {
-// 		cache.lock.Unlock()
-// 		entry.lock.Lock()
-// 		defer entry.lock.Unlock()
-
-// 		if entry.state != AVAILABLE {
-// 			return true, nil
-// 		}
-
-// 		return false, nil
-// 	}
-
-// 	cache.lock.Unlock()
-
-// 	return false, nil
-// }
-
 // New Creates a new cache. Parameters are:
 //
 // capacity: maximum number of entries that cache can manage without evicting the least recently used
