@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	models "github.com/geniussportsgroup/gateway_cache/models"
+	models "github.com/geniussportsgroup/gateway_cache/v2/models"
 	mock "github.com/stretchr/testify/mock"
 )
 
