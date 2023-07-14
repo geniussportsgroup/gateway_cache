@@ -631,16 +631,16 @@ func TestCacheDriver_Touch(t *testing.T) {
 }
 
 // test the StoreValue method first insert values in the cache
-func TestCacheDriver_RetrieveValue(t *testing.T) {
+func TestCacheDriver_StoreOrUpdateValue(t *testing.T) {
 	processor := mocks.NewProcessorI[int, int](t)
 	cache := New[int, int](Capacity, .4, TTL, processor)
 
 	elements := Capacity
 	for i := 0; i < elements; i++ {
 		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(2)
-		err := cache.StoreValue(i, i)
+		err := cache.StoreOrUpdate(i, i)
 		assert.Nil(t, err)
-		err = cache.StoreValue(i, i)
+		err = cache.StoreOrUpdate(i, i)
 		assert.Nil(t, err)
 	}
 
@@ -654,7 +654,7 @@ func TestCacheDriver_RetrieveValue(t *testing.T) {
 	}
 }
 
-func TestCacheDriver_RetrieveValueConcurrentInsert(t *testing.T) {
+func TestCacheDriver_StoreValueConcurrentInsert(t *testing.T) {
 	processor := mocks.NewProcessorI[int, int](t)
 	cache := New[int, int](Capacity, .4, TTL, processor)
 
@@ -666,7 +666,7 @@ func TestCacheDriver_RetrieveValueConcurrentInsert(t *testing.T) {
 		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(goroutines)
 		for j := 0; j < goroutines; j++ {
 			go func(i int, t *testing.T, wg *sync.WaitGroup) {
-				err := cache.StoreValue(i, i)
+				err := cache.StoreOrUpdate(i, i)
 				assert.Nil(t, err)
 				wg.Done()
 			}(i, t, &wg)
@@ -685,7 +685,7 @@ func TestCacheDriver_RetrieveValueConcurrentInsert(t *testing.T) {
 }
 
 // test retrieve value
-func TestCacheDriver_RetrieveValueConcurrentRetrieve(t *testing.T) {
+func TestCacheDriver_RetrieveValue(t *testing.T) {
 	processor := mocks.NewProcessorI[int, int](t)
 	cache := New[int, int](Capacity, .4, TTL, processor)
 

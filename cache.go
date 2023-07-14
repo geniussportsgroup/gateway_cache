@@ -706,7 +706,7 @@ func (cache *CacheDriver[T, K]) Contains(keyVal T) (bool, error) {
 
 // testing
 // Add other in retrieve from cache or compute
-func (cache *CacheDriver[T, K]) StoreValue(keyVal T, newValue K) error {
+func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 
 	key, err := cache.processor.ToMapKey(keyVal)
 	if err != nil {
@@ -716,7 +716,9 @@ func (cache *CacheDriver[T, K]) StoreValue(keyVal T, newValue K) error {
 	cache.lock.Lock()
 
 	if entry, ok := cache.table[key]; ok {
+		cache.hitCount++
 		cache.lock.Unlock()
+
 		entry.lock.Lock()
 		defer entry.lock.Unlock()
 
@@ -739,9 +741,13 @@ func (cache *CacheDriver[T, K]) StoreValue(keyVal T, newValue K) error {
 			} else {
 				entry.postProcessedResponse = newValue
 			}
-			// cache.lock.Lock()
-			// cache.becomeMru(entry)
-			// cache.lock.Unlock()
+
+			entry.timestamp = currentTime
+			entry.expirationTime = currentTime.Add(cache.ttl)
+
+			cache.lock.Lock()
+			cache.becomeMru(entry)
+			cache.lock.Unlock()
 			return nil
 		}
 
@@ -750,44 +756,46 @@ func (cache *CacheDriver[T, K]) StoreValue(keyVal T, newValue K) error {
 		}
 
 		return ErrEntryComputingState
-	} else {
-		currTime := time.Now()
-		entry, err = cache.allocateEntry(key, currTime)
+	}
+
+	currTime := time.Now()
+	entry, err := cache.allocateEntry(key, currTime)
+
+	if err != nil {
+		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
+		// return cache.callUServices(request, payload, other...)
+		return err
+	}
+
+	entry.state = COMPUTING
+
+	//TODO specify if increases this one
+	cache.missCount++
+	cache.lock.Unlock() // release global lock before to take the entry lock
+
+	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
+	defer entry.lock.Unlock()
+
+	retVal := newValue
+	entry.state = COMPUTED
+
+	if cache.toCompress {
+		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
-			cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
-			// return cache.callUServices(request, payload, other...)
-			return err
+			entry.state = FAILED5xx
 		}
-
-		entry.state = COMPUTING
-
-		//TODO specify if increases this one
-		// cache.missCount++
-		cache.lock.Unlock() // release global lock before to take the entry lock
-
-		entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
-		defer entry.lock.Unlock()
-
-		retVal := newValue
-		entry.state = COMPUTED
-
-		if cache.toCompress {
-			buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
-			if err != nil {
-				entry.state = FAILED5xx
-			}
-			lz4Buf, err := cache.compressor.Compress(buf)
-			if err != nil {
-				entry.state = FAILED5xx
-				entry.postProcessedResponse = retVal
-			} else {
-				entry.postProcessedResponseCompressed = lz4Buf
-			}
-			return nil
+		lz4Buf, err := cache.compressor.Compress(buf)
+		if err != nil {
+			entry.state = FAILED5xx
+			entry.postProcessedResponse = retVal
+		} else {
+			entry.postProcessedResponseCompressed = lz4Buf
 		}
-		entry.postProcessedResponse = retVal
-		entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 		return nil
 	}
+
+	entry.postProcessedResponse = retVal
+	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
+	return nil
 
 }
