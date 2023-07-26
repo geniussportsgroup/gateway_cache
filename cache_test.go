@@ -630,6 +630,82 @@ func TestCacheDriver_Touch(t *testing.T) {
 	}
 }
 
+// test the StoreValue method first insert values in the cache
+func TestCacheDriver_StoreOrUpdateValue(t *testing.T) {
+	processor := mocks.NewProcessorI[int, int](t)
+	cache := New[int, int](Capacity, .4, TTL, processor)
+
+	elements := Capacity
+	for i := 0; i < elements; i++ {
+		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(2)
+		err := cache.StoreOrUpdate(i, i)
+		assert.Nil(t, err)
+		err = cache.StoreOrUpdate(i, i)
+		assert.Nil(t, err)
+	}
+
+	for i := 0; i < elements; i++ {
+		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(1)
+		val, err := cache.RetrieveFromCacheOrCompute(i)
+
+		assert.Equal(t, val, i)
+		assert.Nil(t, err)
+
+	}
+}
+
+func TestCacheDriver_StoreValueConcurrentInsert(t *testing.T) {
+	processor := mocks.NewProcessorI[int, int](t)
+	cache := New[int, int](Capacity, .4, TTL, processor)
+
+	elements := Capacity
+	goroutines := 5
+	wg := sync.WaitGroup{}
+	wg.Add(goroutines * elements)
+	for i := 0; i < elements; i++ {
+		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(goroutines)
+		for j := 0; j < goroutines; j++ {
+			go func(i int, t *testing.T, wg *sync.WaitGroup) {
+				err := cache.StoreOrUpdate(i, i)
+				assert.Nil(t, err)
+				wg.Done()
+			}(i, t, &wg)
+		}
+	}
+	wg.Wait()
+
+	for i := 0; i < elements; i++ {
+		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(1)
+		val, err := cache.RetrieveFromCacheOrCompute(i)
+
+		assert.Equal(t, val, i)
+		assert.Nil(t, err)
+
+	}
+}
+
+// test retrieve value
+func TestCacheDriver_RetrieveValue(t *testing.T) {
+	processor := mocks.NewProcessorI[int, int](t)
+	cache := New[int, int](Capacity, .4, TTL, processor)
+
+	elements := Capacity
+	for i := 0; i < elements; i++ {
+		b, requestError := insertEntry(cache, processor, i)
+		assert.Nil(t, requestError)
+		assert.NotNil(t, b)
+	}
+
+	for i := 0; i < elements; i++ {
+		processor.EXPECT().ToMapKey(i).Return(fmt.Sprint(i), nil).Times(1)
+		val, err := cache.RetrieveValue(i)
+
+		assert.Equal(t, val, i)
+		assert.Nil(t, err)
+
+	}
+}
+
 //benchmark to test the performance of the cache
 //when the processor should perform an addition task
 
