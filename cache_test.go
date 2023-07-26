@@ -706,6 +706,66 @@ func TestCacheDriver_RetrieveValue(t *testing.T) {
 	}
 }
 
+func TestTTLForNegative(t *testing.T) {
+
+	assert := assert.New(t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	cache := New[*RequestEntry, *RequestEntry](
+		Capacity,
+		.4,
+		2*time.Second,
+		processor,
+		WithTTLForNegative[*RequestEntry, *RequestEntry](1*time.Second),
+	)
+
+	//Add a negative entry
+
+	negativePayload := &RequestEntry{}
+	processor.EXPECT().ToMapKey(negativePayload).Return("Keats", nil).Times(4)
+	processor.EXPECT().CacheMissSolver(negativePayload).Return(nil, &models.RequestError{
+		Code: Status5xx,
+	}).Times(1)
+
+	//negative assertions
+	_, requestErr := cache.RetrieveFromCacheOrCompute(negativePayload)
+	assert.NotNil(requestErr)
+
+	normalPayload := &RequestEntry{N: 1}
+
+	processor.EXPECT().ToMapKey(normalPayload).Return("Keats1", nil).Times(4)
+	processor.EXPECT().CacheMissSolver(normalPayload).Return(nil, nil).Times(1)
+
+	_, requestErr = cache.RetrieveFromCacheOrCompute(normalPayload)
+	assert.Nil(requestErr)
+
+	contained, err := cache.Contains(negativePayload)
+	assert.Nil(err)
+	assert.True(contained)
+
+	contained, err = cache.Contains(normalPayload)
+	assert.Nil(err)
+	assert.True(contained)
+
+	time.Sleep(1 * time.Second)
+	contained, err = cache.Contains(negativePayload)
+	assert.Nil(err)
+	assert.False(contained)
+
+	contained, err = cache.Contains(normalPayload)
+	assert.Nil(err)
+	assert.True(contained)
+
+	time.Sleep(1 * time.Second)
+
+	contained, err = cache.Contains(negativePayload)
+	assert.Nil(err)
+	assert.False(contained)
+
+	contained, err = cache.Contains(normalPayload)
+	assert.Nil(err)
+	assert.False(contained)
+}
+
 //benchmark to test the performance of the cache
 //when the processor should perform an addition task
 
