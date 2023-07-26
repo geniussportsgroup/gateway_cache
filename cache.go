@@ -678,14 +678,32 @@ func (cache *CacheDriver[T, K]) RetrieveValue(keyVal T) (K, error) {
 	}
 
 	cache.lock.Lock()
-	if entry, ok := cache.table[key]; ok {
+	if entry, ok := cache.table[key]; ok && entry.expirationTime.After(time.Now()) {
 		cache.lock.Unlock()
 		entry.lock.Lock()
 		defer entry.lock.Unlock()
 
-		if entry.state != AVAILABLE {
-			return entry.postProcessedResponse, nil
+		for entry.state == COMPUTING { // this guard is for protection; it should never be true
+			entry.cond.Wait() // it will wake up when result arrives
 		}
+
+		if entry.state != AVAILABLE {
+			answer := entry.postProcessedResponse
+			if cache.toCompress {
+				buf, err := cache.compressor.Decompress(entry.postProcessedResponseCompressed)
+				if err != nil {
+					return zeroK, err
+				}
+
+				answer, err = cache.transformer.BytesToValue(buf)
+				if err != nil {
+					return zeroK, err
+				}
+
+			}
+			return answer, nil
+		}
+
 		return zeroK, nil
 
 	}
