@@ -68,6 +68,7 @@ func (p *MyProcessor) CacheMissSolver(request *RequestEntry,
 			Code:  Status5xx,
 		}
 	}
+
 	return b, nil
 }
 func TestNew(t *testing.T) {
@@ -772,9 +773,44 @@ func TestTTLForNegative(t *testing.T) {
 	assert.False(contained)
 }
 
-//benchmark to test the performance of the cache
-//when the processor should perform an addition task
+type Other struct{}
 
+func (p *Other) ToMapKey(entry string) (string, error) {
+	return entry, nil
+}
+
+func (p *Other) CacheMissSolver(entry string, other ...interface{}) (string, *models.RequestError) {
+	response, ok := other[0].(string)
+	if !ok {
+		return "", &models.RequestError{
+			Code: Status5xx,
+		}
+	}
+	return response, nil
+}
+
+func TestOtherInCache(t *testing.T) {
+	assert := assert.New(t)
+	p := &Other{}
+	cache := New[string, string](
+		Capacity,
+		.4,
+		2*time.Second,
+		time.Second,
+		p,
+	)
+	value, err := cache.RetrieveFromCacheOrCompute("1", "Keats")
+	assert.Nil(err)
+	assert.Equal("Keats", value)
+
+	value, err = cache.RetrieveFromCacheOrCompute("2", 0)
+	assert.NotNil(err)
+	assert.Equal(err.Code, Status5xx)
+	assert.Equal("", value)
+}
+
+// benchmark to test the performance of the cache
+// when the processor should perform an addition task
 type BenchProcessor struct{}
 
 type Adder struct {
@@ -785,7 +821,7 @@ func (p *BenchProcessor) ToMapKey(adder Adder) (string, error) {
 	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
 }
 
-func (p *BenchProcessor) CacheMissSolver(adder Adder) (int, *models.RequestError) {
+func (p *BenchProcessor) CacheMissSolver(adder Adder, _ ...interface{}) (int, *models.RequestError) {
 	return adder.num1 + adder.num2, nil
 }
 
