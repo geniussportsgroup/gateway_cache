@@ -18,7 +18,7 @@ import (
 //go:generate mockery --name ProcessorI --with-expecter=true --filename=processor_mock.go
 type ProcessorI[K, T any] interface {
 	ToMapKey(K) (string, error)
-	CacheMissSolver(K) (T, *models.RequestError) //we will leave the pre process logic for this function
+	CacheMissSolver(K, ...interface{}) (T, *models.RequestError) //we will leave the pre process logic for this function
 }
 
 // CompressorI is the interface that wraps the basic Compress and Decompress methods.

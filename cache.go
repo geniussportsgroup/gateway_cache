@@ -200,16 +200,11 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 
 type Options[K, T any] func(*CacheDriver[K, T])
 
-func WithTTLForNegative[K, T any](ttl time.Duration) Options[K, T] {
-	return func(cache *CacheDriver[K, T]) {
-		cache.ttlForNegative = ttl
-	}
-}
-
 func New[K any, T any](
 	capacity int,
 	capFactor float64,
 	ttl time.Duration,
+	ttlForNegative time.Duration,
 	processor ProcessorI[K, T],
 	options ...Options[K, T],
 ) *CacheDriver[K, T] {
@@ -227,7 +222,7 @@ func New[K any, T any](
 		extendedCapacity: int(extendedCapacity),
 		numEntries:       0,
 		ttl:              ttl,
-		ttlForNegative:   ttl,
+		ttlForNegative:   ttlForNegative,
 		table:            make(map[string]*CacheEntry[T], int(extendedCapacity)),
 		processor:        processor,
 		compressor:       lz4Compressor{},
@@ -295,12 +290,13 @@ func NewWithCompression[T any, K any](
 	capacity int,
 	capFactor float64,
 	ttl time.Duration,
+	ttlForNegative time.Duration,
 	processor ProcessorI[T, K],
 	compressor TransformerI[K],
 	options ...Options[T, K],
 ) (cache *CacheDriver[T, K]) {
 
-	cache = New(capacity, capFactor, ttl, processor, options...)
+	cache = New(capacity, capFactor, ttl, ttlForNegative, processor, options...)
 	if cache != nil {
 		cache.toCompress = true
 		cache.transformer = compressor
@@ -417,7 +413,8 @@ func (cache *CacheDriver[T, K]) allocateEntry(
 // immediately returns the cached entry. If the request is the first, then it blocks until the result is
 // ready. If the request is not the first but the result is not still ready, then it blocks
 // until the result is ready
-func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *models.RequestError) {
+func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
+	other ...interface{}) (K, *models.RequestError) {
 
 	var requestError *models.RequestError
 	var zeroK K
@@ -507,7 +504,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T) (K, *model
 	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
 	defer entry.lock.Unlock()
 
-	retVal, requestError := cache.processor.CacheMissSolver(request)
+	retVal, requestError := cache.processor.CacheMissSolver(request, other...)
 	if requestError != nil {
 		switch requestError.Code {
 		case Status4xx, Status4xxCached:
