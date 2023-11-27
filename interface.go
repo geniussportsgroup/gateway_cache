@@ -47,6 +47,18 @@ type TransformerI[T any] interface {
 	ValueToBytes(T) ([]byte, error)
 }
 
+// Reporter is the interface that wraps the basic ReportMiss and ReportHit methods
+//
+// # ReportMiss is used to report a cache miss
+//
+// # ReportHit is used to report a cache hit
+//
+//go:generate mockery --name Reporter --with-expecter=true --filename=reporter_mock.go
+type Reporter interface {
+	ReportMiss()
+	ReportHit()
+}
+
 type DefaultTransformer[T any] struct{}
 
 func (_ *DefaultTransformer[T]) BytesToValue(in []byte) (T, error) {

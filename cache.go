@@ -64,6 +64,7 @@ type CacheDriver[K any, T any] struct {
 	processor        ProcessorI[K, T]
 	transformer      TransformerI[T]
 	compressor       CompressorI
+	reporter         Reporter
 }
 
 func (cache *CacheDriver[T, K]) MissCount() int {
@@ -226,6 +227,7 @@ func New[K any, T any](
 		table:            make(map[string]*CacheEntry[T], int(extendedCapacity)),
 		processor:        processor,
 		compressor:       lz4Compressor{},
+		reporter:         &DefaultReporter{},
 	}
 	ret.head.prev = &ret.head
 	ret.head.next = &ret.head
@@ -303,6 +305,10 @@ func NewWithCompression[T any, K any](
 	}
 
 	return cache
+}
+
+func (cache *CacheDriver[T, K]) SetReporter(reporter Reporter) {
+	cache.reporter = reporter
 }
 
 // Insert entry as the first item of cache (mru)
@@ -438,9 +444,9 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 	entry, hit = cache.table[cacheKey]
 	if hit && currTime.Before(entry.expirationTime) {
 		cache.hitCount++
+		go cache.reporter.ReportHit()
 		cache.becomeMru(entry) //TODO: check if it is negative
 		cache.lock.Unlock()
-
 		entry.lock.Lock()              // will block if it is computing
 		for entry.state == COMPUTING { // this guard is for protection; it should never be true
 			entry.cond.Wait() // it will wake up when result arrives
@@ -498,10 +504,10 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 
 	entry.state = COMPUTING
 
+	go cache.reporter.ReportMiss()
 	cache.missCount++
 	cache.lock.Unlock() // release global lock before to take the entry lock
-
-	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
+	entry.lock.Lock()   // other requests will wait for until postProcessedResponse is gotten
 	defer entry.lock.Unlock()
 
 	retVal, requestError := cache.processor.CacheMissSolver(request, other...)

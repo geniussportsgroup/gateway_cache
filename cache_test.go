@@ -807,7 +807,64 @@ func TestOtherInCache(t *testing.T) {
 	assert.NotNil(err)
 	assert.Equal(err.Code, Status5xx)
 	assert.Equal("", value)
+
 }
+
+type MockReporter struct {
+	missCount chan int
+	hitCount  chan int
+}
+
+func (m *MockReporter) ReportMiss() {
+	m.missCount <- 1
+}
+
+func (m *MockReporter) ReportHit() {
+	m.hitCount <- 1
+}
+
+func TestReporter(t *testing.T) {
+
+	assert := assert.New(t)
+	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	reporter := &MockReporter{
+		missCount: make(chan int, 1),
+		hitCount:  make(chan int, 1),
+	}
+	cache := New[*RequestEntry, *RequestEntry](
+		Capacity,
+		.4,
+		2*time.Second,
+		time.Second,
+		processor,
+	)
+
+	cache.SetReporter(reporter)
+
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	processor.EXPECT().CacheMissSolver(mock.Anything).Return(nil, nil).Times(1)
+	_, err := cache.RetrieveFromCacheOrCompute(&RequestEntry{})
+	assert.Nil(err)
+	missCount := <-reporter.missCount
+	assert.Equal(1, missCount)
+
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	_, err = cache.RetrieveFromCacheOrCompute(&RequestEntry{})
+	assert.Nil(err)
+	hitCount := <-reporter.hitCount
+	assert.Equal(1, hitCount)
+
+}
+
+// reporter.AssertNumberOfCalls(t, "ReportMiss", 1)
+// reporter.AssertNumberOfCalls(t, "ReportHit", 0)
+
+// processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+// processor.EXPECT().CacheMissSolver(mock.Anything).Return(nil, nil).Times(1)
+// _, err = cache.RetrieveFromCacheOrCompute(&RequestEntry{})
+// assert.Nil(err)
+// reporter.AssertNumberOfCalls(t, "ReportMiss", 1)
+// reporter.AssertNumberOfCalls(t, "ReportHit", 1)
 
 // benchmark to test the performance of the cache
 // when the processor should perform an addition task
