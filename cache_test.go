@@ -856,18 +856,6 @@ func TestReporter(t *testing.T) {
 
 }
 
-// reporter.AssertNumberOfCalls(t, "ReportMiss", 1)
-// reporter.AssertNumberOfCalls(t, "ReportHit", 0)
-
-// processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
-// processor.EXPECT().CacheMissSolver(mock.Anything).Return(nil, nil).Times(1)
-// _, err = cache.RetrieveFromCacheOrCompute(&RequestEntry{})
-// assert.Nil(err)
-// reporter.AssertNumberOfCalls(t, "ReportMiss", 1)
-// reporter.AssertNumberOfCalls(t, "ReportHit", 1)
-
-// benchmark to test the performance of the cache
-// when the processor should perform an addition task
 type BenchProcessor struct{}
 
 type Adder struct {
