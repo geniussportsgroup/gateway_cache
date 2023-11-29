@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/geniussportsgroup/gateway_cache/v2/models"
+	"github.com/geniussportsgroup/gateway_cache/v2/reporter"
 )
 
 // State that a cache entry could have
@@ -227,7 +228,7 @@ func New[K any, T any](
 		table:            make(map[string]*CacheEntry[T], int(extendedCapacity)),
 		processor:        processor,
 		compressor:       lz4Compressor{},
-		reporter:         &DefaultReporter{},
+		reporter:         &reporter.Default{},
 	}
 	ret.head.prev = &ret.head
 	ret.head.next = &ret.head
