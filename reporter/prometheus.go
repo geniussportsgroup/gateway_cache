@@ -7,11 +7,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// PrometheusReporter is a reporter that reports to prometheus
 type PrometheusReporter struct {
 	missCounter prometheus.Counter
 	hitCounter  prometheus.Counter
 }
 
+// NewPrometheusReporter creates a new prometheus reporter
+// using NewPrometheusCounter to create the counters
 func NewPrometheusReporter(
 	serviceName string,
 	cacheName string,
@@ -30,6 +33,11 @@ func NewPrometheusReporter(
 	}
 }
 
+// NewPrometheusCounter creates a new prometheus counter
+// serviceName: the name of the service
+// cacheName: the name of the cache
+// counterType: the type of the counter
+// build the counter name as: serviceName_counterType_total
 func NewPrometheusCounter(
 	serviceName string,
 	cacheName string,
