@@ -52,3 +52,13 @@ func NewPrometheusCounter(
 		},
 	})
 }
+
+// ReportMiss reports a cache miss
+func (pr *PrometheusReporter) ReportMiss() {
+	pr.missCounter.Inc()
+}
+
+// ReportHit reports a cache hit
+func (pr *PrometheusReporter) ReportHit() {
+	pr.hitCounter.Inc()
+}
