@@ -500,7 +500,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 	if err != nil {
 		cache.lock.Unlock() // an error getting cache entry ==> we invoke directly the uservice
 		// return cache.callUServices(request, payload, other...)
-		return cache.processor.CacheMissSolver(request)
+		return cache.processor.CacheMissSolver(request, other...)
 	}
 
 	entry.state = COMPUTING
