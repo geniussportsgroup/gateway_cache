@@ -35,7 +35,8 @@ func main() {
 		capFactor,
 		ttl,
 		ttl,
-		p,
+		p.CacheMissSolver,
+		p.ToMapKey,
 	)
 
 	// compute and set the value

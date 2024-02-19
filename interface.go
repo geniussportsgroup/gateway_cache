@@ -2,8 +2,6 @@ package gw_cache
 
 import (
 	"encoding/json"
-
-	"github.com/geniussportsgroup/gateway_cache/v2/models"
 )
 
 // ProcessorI is the interface used to map the key and get the value in case it is missing.
@@ -16,10 +14,10 @@ import (
 // T represents the value's type  itself, this will be used as a value
 //
 //go:generate mockery --name ProcessorI --with-expecter=true --filename=processor_mock.go
-type ProcessorI[K, T any] interface {
-	ToMapKey(K) (string, error)
-	CacheMissSolver(K, ...interface{}) (T, *models.RequestError) //we will leave the pre process logic for this function
-}
+// type ProcessorI[K, T any] interface {
+// 	ToMapKey(K) (string, error)
+// 	CacheMissSolver(K, ...interface{}) (T, *models.RequestError) //we will leave the pre process logic for this function
+// }
 
 // CompressorI is the interface that wraps the basic Compress and Decompress methods.
 //
