@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/geniussportsgroup/gateway_cache/v2/mocks"
+	"github.com/geniussportsgroup/gateway_cache/v3/mocks"
 
-	"github.com/geniussportsgroup/gateway_cache/v2/models"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -48,7 +47,7 @@ func (p *MyProcessor) ToMapKey(entry *RequestEntry) (string, error) {
 }
 
 func (p *MyProcessor) CacheMissSolver(request *RequestEntry,
-	other ...interface{}) ([]byte, *models.RequestError) {
+	other ...interface{}) ([]byte, *RequestError) {
 
 	entry := request
 	urequest := &URequest{
@@ -63,7 +62,7 @@ func (p *MyProcessor) CacheMissSolver(request *RequestEntry,
 	}
 	b, err := json.Marshal(*response)
 	if err != nil {
-		return nil, &models.RequestError{
+		return nil, &RequestError{
 			Error: err,
 			Code:  Status5xx,
 		}
@@ -109,7 +108,7 @@ const TTL = 15 * time.Second
 func TestWithCompress(t *testing.T) {
 
 	transformer := mocks.NewTransformerI[any](t)
-	processor := mocks.NewProcessorI[any, any](t)
+	processor := NewMockProcessorI[any, any](t)
 	compressor := mocks.NewCompressorI(t)
 
 	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
@@ -118,8 +117,14 @@ func TestWithCompress(t *testing.T) {
 	compressedResponse := []byte("compressed")
 	compressor.EXPECT().Compress([]byte(keats)).Return(compressedResponse, nil).Times(1)
 
-	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute,
-		20*time.Second, processor.CacheMissSolver, processor.ToMapKey, transformer)
+	cache := NewWithCompression[any, any](
+		Capacity,
+		.4,
+		3*time.Minute,
+		20*time.Second,
+		processor.CacheMissSolver,
+		processor.ToMapKey,
+		transformer)
 	cache.compressor = compressor
 
 	val, ptr := cache.RetrieveFromCacheOrCompute("Keats")
@@ -137,9 +142,9 @@ func TestWithCompress(t *testing.T) {
 
 func insertEntry[T any](
 	cache *CacheDriver[T, T],
-	processor *mocks.ProcessorI[T, T],
+	processor *MockProcessorI[T, T],
 	request T,
-) (T, *models.RequestError) {
+) (T, *RequestError) {
 	s, _ := json.Marshal(request)
 	processor.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
 	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
@@ -149,7 +154,7 @@ func insertEntry[T any](
 
 func createCacheWithCapEntriesInside(
 	capacity int,
-	processor *mocks.ProcessorI[*RequestEntry, *RequestEntry],
+	processor *MockProcessorI[*RequestEntry, *RequestEntry],
 ) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
 	cache := New[*RequestEntry, *RequestEntry](capacity, .4, TTL, TTL, processor.CacheMissSolver, processor.ToMapKey)
@@ -169,7 +174,7 @@ func createCacheWithCapEntriesInside(
 
 func createCompressedCacheWithCapEntriesInside(
 	capacity int,
-	processor *mocks.ProcessorI[*RequestEntry, *RequestEntry],
+	processor *MockProcessorI[*RequestEntry, *RequestEntry],
 ) (*CacheDriver[*RequestEntry, *RequestEntry], map[*RequestEntry]bool) {
 
 	transformer := &DefaultTransformer[*RequestEntry]{}
@@ -191,7 +196,7 @@ func createCompressedCacheWithCapEntriesInside(
 
 func TestEvictions(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(Capacity, processor)
 
 	// now we insert Capacity new entries which should evict all the previously inserted ones
@@ -214,7 +219,7 @@ func TestEvictions(t *testing.T) {
 
 func TestCacheDriver_Has(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(Capacity, processor)
 
 	for req := range tbl {
@@ -226,7 +231,7 @@ func TestCacheDriver_Has(t *testing.T) {
 
 func TestLRUOrder(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, _ := createCacheWithCapEntriesInside(
 		Capacity,
 		processor,
@@ -244,7 +249,7 @@ func TestLRUOrder(t *testing.T) {
 func TestCacheDriver_testTTL(t *testing.T) {
 
 	ttl := 3 * time.Second
-	processor := mocks.NewProcessorI[any, any](t)
+	processor := NewMockProcessorI[any, any](t)
 	cache := New[any, any](Capacity, .4, ttl, ttl, processor.CacheMissSolver, processor.ToMapKey)
 
 	request := &RequestEntry{
@@ -264,7 +269,7 @@ func TestCacheDriver_testTTL(t *testing.T) {
 }
 
 func TestRandomTouches(t *testing.T) {
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		2,
 		processor,
@@ -291,7 +296,7 @@ func TestRandomTouches(t *testing.T) {
 }
 
 func TestCompressRandomTouches(t *testing.T) {
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCompressedCacheWithCapEntriesInside(
 		2,
 		processor,
@@ -321,7 +326,7 @@ func TestCompressRandomTouches(t *testing.T) {
 
 func TestCacheDriver_CacheState(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		2,
 		processor,
@@ -349,7 +354,7 @@ func TestCacheDriver_CacheState(t *testing.T) {
 
 func TestCacheDriver_Clean(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		processor,
@@ -552,7 +557,7 @@ func TestConcurrencyAndCompress(t *testing.T) {
 
 func TestCacheDriver_LazyRemove(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		processor,
@@ -585,7 +590,7 @@ func TestCacheDriver_LazyRemove(t *testing.T) {
 
 func TestCacheDriver_Contains(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		processor,
@@ -615,7 +620,7 @@ func TestCacheDriver_Contains(t *testing.T) {
 
 func TestCacheDriver_Touch(t *testing.T) {
 
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache, tbl := createCacheWithCapEntriesInside(
 		Capacity,
 		processor,
@@ -642,7 +647,7 @@ func TestCacheDriver_Touch(t *testing.T) {
 
 // test the StoreValue method first insert values in the cache
 func TestCacheDriver_StoreOrUpdateValue(t *testing.T) {
-	processor := mocks.NewProcessorI[int, int](t)
+	processor := NewMockProcessorI[int, int](t)
 	cache := New[int, int](Capacity, .4, TTL, TTL, processor.CacheMissSolver, processor.ToMapKey)
 
 	elements := Capacity
@@ -665,7 +670,7 @@ func TestCacheDriver_StoreOrUpdateValue(t *testing.T) {
 }
 
 func TestCacheDriver_StoreValueConcurrentInsert(t *testing.T) {
-	processor := mocks.NewProcessorI[int, int](t)
+	processor := NewMockProcessorI[int, int](t)
 	cache := New[int, int](Capacity, .4, TTL, TTL, processor.CacheMissSolver, processor.ToMapKey)
 
 	elements := Capacity
@@ -696,7 +701,7 @@ func TestCacheDriver_StoreValueConcurrentInsert(t *testing.T) {
 
 // test retrieve value
 func TestCacheDriver_RetrieveValue(t *testing.T) {
-	processor := mocks.NewProcessorI[int, int](t)
+	processor := NewMockProcessorI[int, int](t)
 	cache := New[int, int](Capacity, .4, TTL, TTL, processor.CacheMissSolver, processor.ToMapKey)
 
 	elements := Capacity
@@ -719,7 +724,7 @@ func TestCacheDriver_RetrieveValue(t *testing.T) {
 func TestTTLForNegative(t *testing.T) {
 
 	assert := assert.New(t)
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	cache := New[*RequestEntry, *RequestEntry](
 		Capacity,
 		.4,
@@ -733,7 +738,7 @@ func TestTTLForNegative(t *testing.T) {
 
 	negativePayload := &RequestEntry{}
 	processor.EXPECT().ToMapKey(negativePayload).Return("Keats", nil).Times(4)
-	processor.EXPECT().CacheMissSolver(negativePayload).Return(nil, &models.RequestError{
+	processor.EXPECT().CacheMissSolver(negativePayload).Return(nil, &RequestError{
 		Code: Status5xx,
 	}).Times(1)
 
@@ -783,10 +788,10 @@ func (p *Other) ToMapKey(entry string) (string, error) {
 	return entry, nil
 }
 
-func (p *Other) CacheMissSolver(entry string, other ...interface{}) (string, *models.RequestError) {
+func (p *Other) CacheMissSolver(entry string, other ...interface{}) (string, *RequestError) {
 	response, ok := other[0].(string)
 	if !ok {
-		return "", &models.RequestError{
+		return "", &RequestError{
 			Code: Status5xx,
 		}
 	}
@@ -831,7 +836,7 @@ func (m *MockReporter) ReportHit() {
 func TestReporter(t *testing.T) {
 
 	assert := assert.New(t)
-	processor := mocks.NewProcessorI[*RequestEntry, *RequestEntry](t)
+	processor := NewMockProcessorI[*RequestEntry, *RequestEntry](t)
 	reporter := &MockReporter{
 		missCount: make(chan int, 1),
 		hitCount:  make(chan int, 1),
@@ -872,7 +877,7 @@ func (p *BenchProcessor) ToMapKey(adder Adder) (string, error) {
 	return fmt.Sprintf("%d+%d", adder.num1, adder.num2), nil
 }
 
-func (p *BenchProcessor) CacheMissSolver(adder Adder, _ ...interface{}) (int, *models.RequestError) {
+func (p *BenchProcessor) CacheMissSolver(adder Adder, _ ...interface{}) (int, *RequestError) {
 	return adder.num1 + adder.num2, nil
 }
 

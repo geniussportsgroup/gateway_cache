@@ -13,11 +13,11 @@ import (
 // K represents the input's type to get a value, this will be used as a key
 // T represents the value's type  itself, this will be used as a value
 //
-//go:generate mockery --name ProcessorI --with-expecter=true --filename=processor_mock.go
-// type ProcessorI[K, T any] interface {
-// 	ToMapKey(K) (string, error)
-// 	CacheMissSolver(K, ...interface{}) (T, *models.RequestError) //we will leave the pre process logic for this function
-// }
+//go:generate mockery --name ProcessorI --with-expecter=true --filename=processor_mock.go --inpackage
+type ProcessorI[K, T any] interface {
+	ToMapKey(K) (string, error)
+	CacheMissSolver(K, ...interface{}) (T, *RequestError) //we will leave the pre process logic for this function
+}
 
 // CompressorI is the interface that wraps the basic Compress and Decompress methods.
 //

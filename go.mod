@@ -1,4 +1,4 @@
-module github.com/geniussportsgroup/gateway_cache/v2
+module github.com/geniussportsgroup/gateway_cache/v3
 
 go 1.20
 
