@@ -18,7 +18,7 @@ func (p *Processor) ToMapKey(someValue int) (string, error) {
 }
 
 // receive the value that will be used as a key and return a string, that will be used as a value
-func (p *Processor) CacheMissSolver(someValue int) (string, *models.RequestError) {
+func (p *Processor) CacheMissSolver(someValue int, _ ...interface{}) (string, *models.RequestError) {
 	time.Sleep(time.Second * 1)
 	return fmt.Sprintf("%d processed", someValue), nil
 }
@@ -33,6 +33,7 @@ func main() {
 	cache := gw_cache.New[int, string](
 		capacity,
 		capFactor,
+		ttl,
 		ttl,
 		p,
 	)

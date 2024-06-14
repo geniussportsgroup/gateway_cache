@@ -18,7 +18,7 @@ import (
 //go:generate mockery --name ProcessorI --with-expecter=true --filename=processor_mock.go
 type ProcessorI[K, T any] interface {
 	ToMapKey(K) (string, error)
-	CacheMissSolver(K) (T, *models.RequestError) //we will leave the pre process logic for this function
+	CacheMissSolver(K, ...interface{}) (T, *models.RequestError) //we will leave the pre process logic for this function
 }
 
 // CompressorI is the interface that wraps the basic Compress and Decompress methods.
@@ -45,6 +45,18 @@ type CompressorI interface {
 type TransformerI[T any] interface {
 	BytesToValue([]byte) (T, error)
 	ValueToBytes(T) ([]byte, error)
+}
+
+// Reporter is the interface that wraps the basic ReportMiss and ReportHit methods
+//
+// # ReportMiss is used to report a cache miss
+//
+// # ReportHit is used to report a cache hit
+//
+//go:generate mockery --name Reporter --with-expecter=true --filename=reporter_mock.go
+type Reporter interface {
+	ReportMiss()
+	ReportHit()
 }
 
 type DefaultTransformer[T any] struct{}
