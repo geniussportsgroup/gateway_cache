@@ -5,8 +5,7 @@ import (
 	"sync"
 	"time"
 
-	gw_cache "github.com/geniussportsgroup/gateway_cache/v2"
-	"github.com/geniussportsgroup/gateway_cache/v2/models"
+	gw_cache "github.com/geniussportsgroup/gateway_cache/v3"
 )
 
 type Processor struct {
@@ -18,7 +17,7 @@ func (p *Processor) ToMapKey(someValue int) (string, error) {
 }
 
 // receive the value that will be used as a key and return a string, that will be used as a value
-func (p *Processor) CacheMissSolver(someValue int, _ ...interface{}) (string, *models.RequestError) {
+func (p *Processor) CacheMissSolver(someValue int, _ ...interface{}) (string, *gw_cache.RequestError) {
 	time.Sleep(time.Second * 1)
 	return fmt.Sprintf("%d processed", someValue), nil
 }
@@ -35,7 +34,8 @@ func main() {
 		capFactor,
 		ttl,
 		ttl,
-		p,
+		p.CacheMissSolver,
+		p.ToMapKey,
 	)
 
 	// compute and set the value
