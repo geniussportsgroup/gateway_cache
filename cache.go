@@ -117,10 +117,6 @@ func (cache *CacheDriver[T, K]) LazyRemove(keyVal T) error {
 		entry.lock.Lock()
 		defer entry.lock.Unlock()
 
-		if entry.expirationTime.Before(time.Now()) {
-			return ErrEntryExpired
-		}
-
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
 			// In this way, when the entry is accessed again, it will be removed
 			entry.timestamp = time.Now()
@@ -158,9 +154,6 @@ func (cache *CacheDriver[T, K]) Touch(keyVal T) error {
 		defer entry.lock.Unlock()
 
 		currentTime := time.Now()
-		if entry.expirationTime.Before(currentTime) {
-			return ErrEntryExpired
-		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
 			// In this way, when the entry is accessed again, it will be removed
@@ -803,9 +796,6 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 		defer entry.lock.Unlock()
 
 		currentTime := time.Now()
-		if entry.expirationTime.Before(currentTime) {
-			return ErrEntryExpired
-		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
 			if cache.toCompress {
