@@ -1,4 +1,4 @@
-package gw_cache
+package models
 
 type RequestError struct {
 	Error    error
