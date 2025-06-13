@@ -539,10 +539,13 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 			entry.expirationTime = currTime.Add(cache.ttlForNegative)
 		} else {
 			entry.postProcessedResponseCompressed = lz4Buf
-		}
+			var zeroK K
+			entry.postProcessedResponse = zeroK
+		}		
+	} else {
+		entry.postProcessedResponse = retVal
 	}
-
-	entry.postProcessedResponse = retVal
+	
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
 	return retVal, requestError

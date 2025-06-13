@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"sync"
 	"time"
@@ -21,6 +23,30 @@ func (p *Processor) ToMapKey(someValue int) (string, error) {
 func (p *Processor) CacheMissSolver(someValue int, _ ...interface{}) (string, *models.RequestError) {
 	time.Sleep(time.Second * 1)
 	return fmt.Sprintf("%d processed", someValue), nil
+}
+
+type GOBTransformer[T any] struct{}
+
+// BytesToValue decodes GOB bytes into a value of type T.
+func (t GOBTransformer[T]) BytesToValue(data []byte) (T, error) {
+  var v T
+  decoder := gob.NewDecoder(bytes.NewReader(data))
+  err := decoder.Decode(&v)
+  return v, err
+}
+
+// ValueToBytes encodes a value of type T into GOB bytes.
+func (t GOBTransformer[T]) ValueToBytes(val T) ([]byte, error) {
+  var buf bytes.Buffer
+  encoder := gob.NewEncoder(&buf)
+  err := encoder.Encode(val)
+  if err != nil {
+    return nil, err
+  }
+
+ fmt.Printf("Val size = %.4f MB\n", float64(len(buf.Bytes()))/(1024*1024))
+
+  return buf.Bytes(), nil
 }
 
 func main() {
@@ -54,4 +80,32 @@ func main() {
 	wg.Wait()
 	fmt.Printf("cache.MissCount(): %v\n", cache.MissCount())
 	fmt.Printf("cache.HitCount(): %v\n", cache.HitCount())
+
+	cacheCompression := gw_cache.NewWithCompression[int, string](
+		capacity,
+		capFactor,
+		ttl,
+		ttl,
+		p,
+		GOBTransformer[string]{},
+	)
+
+	// compute and set the value
+	wgCompression := sync.WaitGroup{}
+	for i := 0; i < 10; i++ {
+		for j := 0; j < 10; j++ {
+			wgCompression.Add(1)
+			go func(i int, wgCompression *sync.WaitGroup) {
+				start := time.Now()
+				value, err := cacheCompression.RetrieveFromCacheOrCompute(i)
+				fmt.Printf("with i:%d v:%s, e:%v\n elapsed time %s\n", i, value, err, time.Since(start).Abs())
+				wgCompression.Done()
+			}(i, &wgCompression)
+		}
+	}
+	wgCompression.Wait()
+	fmt.Printf("cache.MissCount(): %v\n", cacheCompression.MissCount())
+	fmt.Printf("cache.HitCount(): %v\n", cacheCompression.HitCount())
+
+	
 }
