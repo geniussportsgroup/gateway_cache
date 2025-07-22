@@ -134,6 +134,43 @@ func TestWithCompress(t *testing.T) {
 	assert.Equal(t, val, keats)
 }
 
+func TestWithCompress_Error(t *testing.T) {
+
+	transformer := mocks.NewTransformerI[any](t)
+	processor := mocks.NewProcessorI[any, any](t)
+	compressor := mocks.NewCompressorI(t)
+
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	processor.EXPECT().CacheMissSolver(mock.Anything).
+		Return(func(any, ...interface{}) (any, *models.RequestError) {
+			return nil, &models.RequestError{
+				Error: fmt.Errorf("cache miss error"),
+				Code:  Status5xx,
+			}
+		}, nil).Times(1)
+
+	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute,
+		20*time.Second, processor, transformer)
+	cache.compressor = compressor
+
+	val, err := cache.RetrieveFromCacheOrCompute("Keats")
+	assert.Nil(t, val)
+	assert.Equal(t, err, &models.RequestError{
+		Error: fmt.Errorf("cache miss error"),
+		Code:  Status5xx,
+	})
+
+	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+
+	val, err = cache.RetrieveFromCacheOrCompute("Keats")
+	assert.Nil(t, val)
+	assert.Equal(t, err, &models.RequestError{
+		Error: fmt.Errorf("cache miss error"),
+		Code:  Status5xxCached,
+	})
+}
+
+
 func insertEntry[T any](
 	cache *CacheDriver[T, T],
 	processor *mocks.ProcessorI[T, T],

@@ -527,7 +527,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 		entry.state = COMPUTED
 	}
 
-	if withCompression {
+	if withCompression && requestError == nil {
 		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
 			entry.state = FAILED5xx
