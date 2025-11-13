@@ -84,8 +84,8 @@ func TestNew(t *testing.T) {
 
 	assert.Equal(t, 100, cache.capacity)
 	assert.Equal(t, time.Minute, cache.ttl)
-	assert.Equal(t, 0, cache.hitCount)
-	assert.Equal(t, 0, cache.missCount)
+	assert.Equal(t, int64(0), cache.HitCount())
+	assert.Equal(t, int64(0), cache.MissCount())
 	assert.Equal(t, 0, cache.numEntries)
 	assert.Less(t, cache.capacity, cache.extendedCapacity)
 }
@@ -376,8 +376,8 @@ func TestCacheDriver_Clean(t *testing.T) {
 
 	err := cache.Clean()
 	assert.Nil(t, err)
-	assert.Equal(t, 0, cache.missCount)
-	assert.Equal(t, 0, cache.hitCount)
+	assert.Equal(t, int64(0), cache.MissCount())
+	assert.Equal(t, int64(0), cache.HitCount())
 	assert.Equal(t, 0, cache.numEntries)
 	assert.Equal(t, Capacity, cache.capacity)
 	assert.Equal(t, TTL, cache.ttl)
@@ -388,8 +388,8 @@ func TestCacheDriver_Clean(t *testing.T) {
 	err = json.Unmarshal([]byte(state), &s)
 
 	assert.Equal(t, 0, s.NumEntries)
-	assert.Equal(t, 0, s.HitCount)
-	assert.Equal(t, 0, s.MissCount)
+	assert.Equal(t, int64(0), s.HitCount)
+	assert.Equal(t, int64(0), s.MissCount)
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {

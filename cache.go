@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/geniussportsgroup/gateway_cache/v3/reporter"
 )
@@ -44,6 +46,35 @@ type CacheEntry[K any] struct {
 	err                             error
 }
 
+// calculateMemorySize calculates the approximate memory size of a cache entry in bytes
+func (entry *CacheEntry[K]) calculateMemorySize() int64 {
+	baseSize := int64(unsafe.Sizeof(*entry))
+	keySize := int64(len(entry.cacheKey))
+	compressedSize := int64(cap(entry.postProcessedResponseCompressed))
+
+	// Approximate size of the postProcessedResponse
+	// This is a rough estimate since K can be any type
+	responseSize := int64(unsafe.Sizeof(entry.postProcessedResponse))
+
+	// For slices/arrays, try to get actual content size
+	// Use reflection to detect if K is a slice type
+	responseValue := any(entry.postProcessedResponse)
+	switch v := responseValue.(type) {
+	case []byte:
+		responseSize += int64(cap(v))
+	case string:
+		responseSize += int64(len(v))
+	}
+
+	// For error, approximate if not nil
+	var errSize int64
+	if entry.err != nil {
+		errSize = int64(len(entry.err.Error()))
+	}
+
+	return baseSize + keySize + compressedSize + responseSize + errSize
+}
+
 // CacheDriver The cache itself.
 //
 // K represents the request's type this will be used as key.
@@ -51,8 +82,8 @@ type CacheEntry[K any] struct {
 // T the response's type this will be used as value.
 type CacheDriver[K any, T any] struct {
 	table            map[string]*CacheEntry[T]
-	missCount        int
-	hitCount         int
+	missCount        int64
+	hitCount         int64
 	ttl              time.Duration
 	ttlForNegative   time.Duration
 	head             CacheEntry[T] // sentinel header node
@@ -60,6 +91,7 @@ type CacheDriver[K any, T any] struct {
 	capacity         int
 	extendedCapacity int
 	numEntries       int
+	memoryUsage      int64 // Atomic counter for memory usage in bytes
 	toCompress       bool
 	// processor        ProcessorI[
 	cacheMissSolver func(K, ...interface{}) (T, *RequestError) //we will leave the pre process logic for this function
@@ -69,16 +101,12 @@ type CacheDriver[K any, T any] struct {
 	reporter        Reporter
 }
 
-func (cache *CacheDriver[T, K]) MissCount() int {
-	cache.lock.Lock()
-	defer cache.lock.Unlock()
-	return cache.missCount
+func (cache *CacheDriver[T, K]) MissCount() int64 {
+	return atomic.LoadInt64(&cache.missCount)
 }
 
-func (cache *CacheDriver[T, K]) HitCount() int {
-	cache.lock.Lock()
-	defer cache.lock.Unlock()
-	return cache.hitCount
+func (cache *CacheDriver[T, K]) HitCount() int64 {
+	return atomic.LoadInt64(&cache.hitCount)
 }
 
 func (cache *CacheDriver[T, K]) Ttl() time.Duration {
@@ -101,6 +129,60 @@ func (cache *CacheDriver[T, K]) NumEntries() int {
 
 func (cache *CacheDriver[T, K]) TTLForNegative() time.Duration {
 	return cache.ttlForNegative
+}
+
+// MemoryUsage returns the approximate memory usage in bytes
+func (cache *CacheDriver[T, K]) MemoryUsage() int64 {
+	return atomic.LoadInt64(&cache.memoryUsage)
+}
+
+// MemoryUsageKB returns the approximate memory usage in kilobytes
+func (cache *CacheDriver[T, K]) MemoryUsageKB() int64 {
+	return cache.MemoryUsage() / 1024
+}
+
+// MemoryUsageMB returns the approximate memory usage in megabytes
+func (cache *CacheDriver[T, K]) MemoryUsageMB() int64 {
+	return cache.MemoryUsage() / (1024 * 1024)
+}
+
+// TotalRequests returns the total number of cache requests (hits + misses)
+func (cache *CacheDriver[T, K]) TotalRequests() int64 {
+	return atomic.LoadInt64(&cache.hitCount) + atomic.LoadInt64(&cache.missCount)
+}
+
+// HitRatio returns the cache hit ratio (hits / total requests)
+func (cache *CacheDriver[T, K]) HitRatio() float64 {
+	hitCount := atomic.LoadInt64(&cache.hitCount)
+	missCount := atomic.LoadInt64(&cache.missCount)
+	total := hitCount + missCount
+	if total == 0 {
+		return 0.0
+	}
+	return float64(hitCount) / float64(total)
+}
+
+// MissRatio returns the cache miss ratio (misses / total requests)
+func (cache *CacheDriver[T, K]) MissRatio() float64 {
+	hitCount := atomic.LoadInt64(&cache.hitCount)
+	missCount := atomic.LoadInt64(&cache.missCount)
+	total := hitCount + missCount
+	if total == 0 {
+		return 0.0
+	}
+	return float64(missCount) / float64(total)
+}
+
+// AverageEntrySize returns the average size of entries in bytes
+func (cache *CacheDriver[T, K]) AverageEntrySize() float64 {
+	cache.lock.Lock()
+	numEntries := cache.numEntries
+	cache.lock.Unlock()
+
+	if numEntries == 0 {
+		return 0.0
+	}
+	return float64(cache.MemoryUsage()) / float64(numEntries)
 }
 
 // LazyRemove removes the entry with keyVal from the cache. It does not remove the entry immediately, but it marks it as	removed.
@@ -389,6 +471,11 @@ func (cache *CacheDriver[T, K]) evictLruEntry() (*CacheEntry[K], error) {
 	if entry.state == COMPUTING {
 		return nil, ErrLRUComputing
 	}
+
+	// Subtract memory before evicting
+	memSize := entry.calculateMemorySize()
+	atomic.AddInt64(&cache.memoryUsage, -memSize)
+
 	entry.selfDeleteFromLRUList()
 	cache.table[entry.cacheKey] = nil
 	delete(cache.table, entry.cacheKey) // Key evicted
@@ -448,7 +535,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 
 	entry, hit = cache.table[cacheKey]
 	if hit && currTime.Before(entry.expirationTime) {
-		cache.hitCount++
+		atomic.AddInt64(&cache.hitCount, 1)
 		go cache.reporter.ReportHit()
 		cache.becomeMru(entry) //TODO: check if it is negative
 		cache.lock.Unlock()
@@ -510,7 +597,7 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 	entry.state = COMPUTING
 
 	go cache.reporter.ReportMiss()
-	cache.missCount++
+	atomic.AddInt64(&cache.missCount, 1)
 	cache.lock.Unlock() // release global lock before to take the entry lock
 	entry.lock.Lock()   // other requests will wait for until postProcessedResponse is gotten
 	defer entry.lock.Unlock()
@@ -531,6 +618,9 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 		entry.state = COMPUTED
 	}
 
+	// Calculate memory before updating entry
+	oldMemSize := entry.calculateMemorySize()
+
 	if withCompression {
 		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
 		if err != nil {
@@ -547,6 +637,14 @@ func (cache *CacheDriver[T, K]) RetrieveFromCacheOrCompute(request T,
 	}
 
 	entry.postProcessedResponse = retVal
+
+	// Update memory tracking
+	newMemSize := entry.calculateMemorySize()
+	memDelta := newMemSize - oldMemSize
+	if memDelta != 0 {
+		atomic.AddInt64(&cache.memoryUsage, memDelta)
+	}
+
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 
 	return retVal, requestError
@@ -614,27 +712,56 @@ func (it *CacheIt[T, K]) Next() *CacheEntry[K] {
 }
 
 type CacheState struct {
-	MissCount      int
-	HitCount       int
-	TTL            time.Duration
-	TTLForNegative time.Duration
-	Capacity       int
-	NumEntries     int
+	MissCount        int64         `json:"missCount"`
+	HitCount         int64         `json:"hitCount"`
+	TotalRequests    int64         `json:"totalRequests"`
+	HitRatio         float64       `json:"hitRatio"`
+	MissRatio        float64       `json:"missRatio"`
+	TTL              time.Duration `json:"ttl"`
+	TTLForNegative   time.Duration `json:"ttlForNegative"`
+	Capacity         int           `json:"capacity"`
+	NumEntries       int           `json:"numEntries"`
+	MemoryUsage      int64         `json:"memoryUsage"`
+	MemoryUsageKB    int64         `json:"memoryUsageKB"`
+	MemoryUsageMB    int64         `json:"memoryUsageMB"`
+	AverageEntrySize float64       `json:"averageEntrySize"`
 }
 
 // GetState Return a json containing the cache state. Use the internal mutex. Be careful with a deadlock
 func (cache *CacheDriver[T, K]) GetState() (string, error) {
+	missCount := atomic.LoadInt64(&cache.missCount)
+	hitCount := atomic.LoadInt64(&cache.hitCount)
+	totalRequests := hitCount + missCount
+	hitRatio := 0.0
+	missRatio := 0.0
+	if totalRequests > 0 {
+		hitRatio = float64(hitCount) / float64(totalRequests)
+		missRatio = float64(missCount) / float64(totalRequests)
+	}
 
+	memUsage := atomic.LoadInt64(&cache.memoryUsage)
 	cache.lock.Lock()
-	defer cache.lock.Unlock()
+	numEntries := cache.numEntries
+	cache.lock.Unlock()
+	avgEntrySize := 0.0
+	if numEntries > 0 {
+		avgEntrySize = float64(memUsage) / float64(numEntries)
+	}
 
 	state := CacheState{
-		MissCount:      cache.missCount,
-		HitCount:       cache.hitCount,
-		TTL:            cache.ttl,
-		TTLForNegative: cache.ttlForNegative,
-		Capacity:       cache.capacity,
-		NumEntries:     cache.numEntries,
+		MissCount:        missCount,
+		HitCount:         hitCount,
+		TotalRequests:    totalRequests,
+		HitRatio:         hitRatio,
+		MissRatio:        missRatio,
+		TTL:              cache.ttl,
+		TTLForNegative:   cache.ttlForNegative,
+		Capacity:         cache.capacity,
+		NumEntries:       numEntries,
+		MemoryUsage:      memUsage,
+		MemoryUsageKB:    memUsage / 1024,
+		MemoryUsageMB:    memUsage / (1024 * 1024),
+		AverageEntrySize: avgEntrySize,
 	}
 
 	buf, err := json.MarshalIndent(&state, "", "  ")
@@ -662,8 +789,9 @@ func (cache *CacheDriver[T, K]) clean() error {
 
 	// At this point all the entries are marked as AVAILABLE ==> we reset
 	cache.numEntries = 0
-	cache.hitCount = 0
-	cache.missCount = 0
+	atomic.StoreInt64(&cache.hitCount, 0)
+	atomic.StoreInt64(&cache.missCount, 0)
+	atomic.StoreInt64(&cache.memoryUsage, 0)
 
 	return nil
 }
@@ -800,7 +928,7 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 	cache.lock.Lock()
 
 	if entry, ok := cache.table[key]; ok {
-		cache.hitCount++
+		atomic.AddInt64(&cache.hitCount, 1)
 		cache.lock.Unlock()
 
 		entry.lock.Lock()
@@ -812,6 +940,8 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 		}
 
 		if entry.state != COMPUTING && entry.state != AVAILABLE {
+			oldMemSize := entry.calculateMemorySize()
+
 			if cache.toCompress {
 				buf, err := cache.transformer.ValueToBytes(newValue)
 				if err != nil {
@@ -828,6 +958,13 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 
 			entry.timestamp = currentTime
 			entry.expirationTime = currentTime.Add(cache.ttl)
+
+			// Update memory tracking
+			newMemSize := entry.calculateMemorySize()
+			memDelta := newMemSize - oldMemSize
+			if memDelta != 0 {
+				atomic.AddInt64(&cache.memoryUsage, memDelta)
+			}
 
 			cache.lock.Lock()
 			cache.becomeMru(entry)
@@ -854,7 +991,7 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 	entry.state = COMPUTING
 
 	//TODO specify if increases this one
-	cache.missCount++
+	atomic.AddInt64(&cache.missCount, 1)
 	cache.lock.Unlock() // release global lock before to take the entry lock
 
 	entry.lock.Lock() // other requests will wait for until postProcessedResponse is gotten
@@ -862,6 +999,8 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 
 	retVal := newValue
 	entry.state = COMPUTED
+
+	oldMemSize := entry.calculateMemorySize()
 
 	if cache.toCompress {
 		buf, err := cache.transformer.ValueToBytes(retVal) // transforms retVal into a []byte ready for compression
@@ -875,10 +1014,17 @@ func (cache *CacheDriver[T, K]) StoreOrUpdate(keyVal T, newValue K) error {
 		} else {
 			entry.postProcessedResponseCompressed = lz4Buf
 		}
-		return nil
+	} else {
+		entry.postProcessedResponse = retVal
 	}
 
-	entry.postProcessedResponse = retVal
+	// Update memory tracking
+	newMemSize := entry.calculateMemorySize()
+	memDelta := newMemSize - oldMemSize
+	if memDelta != 0 {
+		atomic.AddInt64(&cache.memoryUsage, memDelta)
+	}
+
 	entry.cond.Broadcast() // wake up eventual requests waiting for the result (which has failed!)
 	return nil
 
