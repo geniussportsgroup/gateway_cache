@@ -29,24 +29,24 @@ type GOBTransformer[T any] struct{}
 
 // BytesToValue decodes GOB bytes into a value of type T.
 func (t GOBTransformer[T]) BytesToValue(data []byte) (T, error) {
-  var v T
-  decoder := gob.NewDecoder(bytes.NewReader(data))
-  err := decoder.Decode(&v)
-  return v, err
+	var v T
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&v)
+	return v, err
 }
 
 // ValueToBytes encodes a value of type T into GOB bytes.
 func (t GOBTransformer[T]) ValueToBytes(val T) ([]byte, error) {
-  var buf bytes.Buffer
-  encoder := gob.NewEncoder(&buf)
-  err := encoder.Encode(val)
-  if err != nil {
-    return nil, err
-  }
+	var buf bytes.Buffer
+	encoder := gob.NewEncoder(&buf)
+	err := encoder.Encode(val)
+	if err != nil {
+		return nil, err
+	}
 
- fmt.Printf("Val size = %.4f MB\n", float64(len(buf.Bytes()))/(1024*1024))
+	fmt.Printf("Val size = %.4f MB\n", float64(len(buf.Bytes()))/(1024*1024))
 
-  return buf.Bytes(), nil
+	return buf.Bytes(), nil
 }
 
 func main() {
@@ -78,8 +78,9 @@ func main() {
 		}
 	}
 	wg.Wait()
-	fmt.Printf("cache.MissCount(): %v\n", cache.MissCount())
-	fmt.Printf("cache.HitCount(): %v\n", cache.HitCount())
+	metrics := cache.Metrics()
+	fmt.Printf("cache.Misses(): %v\n", metrics.Misses())
+	fmt.Printf("cache.Hits(): %v\n", metrics.Hits())
 
 	cacheCompression := gw_cache.NewWithCompression[int, string](
 		capacity,
@@ -104,8 +105,8 @@ func main() {
 		}
 	}
 	wgCompression.Wait()
-	fmt.Printf("cache.MissCount(): %v\n", cacheCompression.MissCount())
-	fmt.Printf("cache.HitCount(): %v\n", cacheCompression.HitCount())
+	compressedMetrics := cacheCompression.Metrics()
+	fmt.Printf("cache.Misses(): %v\n", compressedMetrics.Misses())
+	fmt.Printf("cache.Hits(): %v\n", compressedMetrics.Hits())
 
-	
 }

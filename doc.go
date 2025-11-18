@@ -16,8 +16,8 @@ will use an int as a key and a string as a value:
 		"fmt"
 		"time"
 
-		gw_cache "github.com/geniussportsgroup/gateway_cache"
-		"github.com/geniussportsgroup/gateway_cache/models"
+		gw_cache "github.com/geniussportsgroup/gateway_cache/v2"
+		"github.com/geniussportsgroup/gateway_cache/v2/models"
 
 	)
 
