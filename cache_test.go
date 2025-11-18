@@ -13,7 +13,7 @@ import (
 
 	"github.com/geniussportsgroup/gateway_cache/v2/models"
 	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/mock"
 )
 
 type RequestEntry struct {
@@ -84,8 +84,8 @@ func TestNew(t *testing.T) {
 
 	assert.Equal(t, 100, cache.capacity)
 	assert.Equal(t, time.Minute, cache.ttl)
-	assert.Equal(t, 0, cache.hitCount)
-	assert.Equal(t, 0, cache.missCount)
+	assert.Equal(t, int64(0), cache.hitCount)
+	assert.Equal(t, int64(0), cache.missCount)
 	assert.Equal(t, 0, cache.numEntries)
 	assert.Less(t, cache.capacity, cache.extendedCapacity)
 }
@@ -112,13 +112,14 @@ func TestWithCompress(t *testing.T) {
 	compressor := mocks.NewCompressorI(t)
 
 	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
-	processor.EXPECT().CacheMissSolver(mock.Anything).Return(keats, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(mock.Anything, mock.Anything).Return(keats, nil).Times(1)
 	transformer.EXPECT().ValueToBytes(keats).Return([]byte(keats), nil).Times(1)
 	compressedResponse := []byte("compressed")
 	compressor.EXPECT().Compress([]byte(keats)).Return(compressedResponse, nil).Times(1)
 
 	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute,
 		20*time.Second, processor, transformer)
+	assert.NotNil(t, cache)
 	cache.compressor = compressor
 
 	val, ptr := cache.RetrieveFromCacheOrCompute("Keats")
@@ -135,41 +136,41 @@ func TestWithCompress(t *testing.T) {
 }
 
 func TestWithCompress_Error(t *testing.T) {
-
-	transformer := mocks.NewTransformerI[any](t)
-	processor := mocks.NewProcessorI[any, any](t)
+	// Use a concrete pointer type for the value, e.g., *string
+	transformer := mocks.NewTransformerI[*string](t)
+	processor := mocks.NewProcessorI[string, *string](t)
 	compressor := mocks.NewCompressorI(t)
 
-	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
-	processor.EXPECT().CacheMissSolver(mock.Anything).
-		Return(func(any, ...interface{}) (any, *models.RequestError) {
-			return nil, &models.RequestError{
-				Error: fmt.Errorf("cache miss error"),
-				Code:  Status5xx,
-			}
-		}, nil).Times(1)
+	processor.EXPECT().ToMapKey("Keats").Return("Keats", nil).Times(1)
+	processor.EXPECT().CacheMissSolver("Keats", mock.Anything).
+		Return((*string)(nil), &models.RequestError{ // Return a typed nil for *string
+			Error: fmt.Errorf("cache miss error"),
+			Code:  Status5xx,
+		}).Times(1)
 
-	cache := NewWithCompression[any, any](Capacity, .4, 3*time.Minute,
+	cache := NewWithCompression[string, *string](Capacity, .4, 3*time.Minute,
 		20*time.Second, processor, transformer)
+	assert.NotNil(t, cache)
 	cache.compressor = compressor
 
+	// The key is a string
 	val, err := cache.RetrieveFromCacheOrCompute("Keats")
-	assert.Nil(t, val)
-	assert.Equal(t, err, &models.RequestError{
+	assert.Nil(t, val) // val is *string, so it can be nil
+	assert.Equal(t, &models.RequestError{
 		Error: fmt.Errorf("cache miss error"),
 		Code:  Status5xx,
-	})
+	}, err)
 
-	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
+	// Second call, should be a cached error
+	processor.EXPECT().ToMapKey("Keats").Return("Keats", nil).Times(1)
 
 	val, err = cache.RetrieveFromCacheOrCompute("Keats")
 	assert.Nil(t, val)
-	assert.Equal(t, err, &models.RequestError{
+	assert.Equal(t, &models.RequestError{
 		Error: fmt.Errorf("cache miss error"),
 		Code:  Status5xxCached,
-	})
+	}, err)
 }
-
 
 func insertEntry[T any](
 	cache *CacheDriver[T, T],
@@ -178,7 +179,7 @@ func insertEntry[T any](
 ) (T, *models.RequestError) {
 	s, _ := json.Marshal(request)
 	processor.EXPECT().ToMapKey(request).Return(string(s), nil).Times(1)
-	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(request, mock.Anything).Return(request, nil).Times(1)
 
 	return cache.RetrieveFromCacheOrCompute(request)
 }
@@ -289,7 +290,7 @@ func TestCacheDriver_testTTL(t *testing.T) {
 	}
 
 	processor.EXPECT().ToMapKey(request).Return(strconv.Itoa(request.Time.Nanosecond()), nil).Times(2)
-	processor.EXPECT().CacheMissSolver(request).Return(request, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(request, mock.Anything).Return(request, nil).Times(1)
 	b, requestError := cache.RetrieveFromCacheOrCompute(request)
 	assert.Nil(t, requestError)
 	assert.NotNil(t, b)
@@ -407,8 +408,8 @@ func TestCacheDriver_Clean(t *testing.T) {
 
 	err := cache.Clean()
 	assert.Nil(t, err)
-	assert.Equal(t, 0, cache.missCount)
-	assert.Equal(t, 0, cache.hitCount)
+	assert.Equal(t, int64(0), cache.missCount)
+	assert.Equal(t, int64(0), cache.hitCount)
 	assert.Equal(t, 0, cache.numEntries)
 	assert.Equal(t, Capacity, cache.capacity)
 	assert.Equal(t, TTL, cache.ttl)
@@ -417,10 +418,33 @@ func TestCacheDriver_Clean(t *testing.T) {
 
 	var s CacheState
 	err = json.Unmarshal([]byte(state), &s)
+	assert.Nil(t, err)
 
 	assert.Equal(t, 0, s.NumEntries)
-	assert.Equal(t, 0, s.HitCount)
-	assert.Equal(t, 0, s.MissCount)
+	assert.Equal(t, int64(0), s.Hits)
+	assert.Equal(t, int64(0), s.Misses)
+}
+
+func TestCacheDriver_CleanRemovesEntries(t *testing.T) {
+	processor := mocks.NewProcessorI[int, int](t)
+	cache := New[int, int](2, .4, TTL, TTL, processor)
+
+	processor.EXPECT().ToMapKey(1).Return("1", nil).Times(2)
+	processor.EXPECT().CacheMissSolver(1, mock.Anything).Return(1, nil).Times(2)
+
+	val, err := cache.RetrieveFromCacheOrCompute(1)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, val)
+
+	cleanErr := cache.Clean()
+	assert.Nil(t, cleanErr)
+	assert.Equal(t, 0, cache.NumEntries())
+
+	val, err = cache.RetrieveFromCacheOrCompute(1)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, val)
+	assert.Equal(t, int64(1), cache.Misses())
+	assert.Equal(t, 1, cache.NumEntries())
 }
 
 func TestCacheDriver_HitCost(t *testing.T) {
@@ -766,7 +790,7 @@ func TestTTLForNegative(t *testing.T) {
 
 	negativePayload := &RequestEntry{}
 	processor.EXPECT().ToMapKey(negativePayload).Return("Keats", nil).Times(4)
-	processor.EXPECT().CacheMissSolver(negativePayload).Return(nil, &models.RequestError{
+	processor.EXPECT().CacheMissSolver(negativePayload, mock.Anything).Return((*RequestEntry)(nil), &models.RequestError{
 		Code: Status5xx,
 	}).Times(1)
 
@@ -777,7 +801,7 @@ func TestTTLForNegative(t *testing.T) {
 	normalPayload := &RequestEntry{N: 1}
 
 	processor.EXPECT().ToMapKey(normalPayload).Return("Keats1", nil).Times(4)
-	processor.EXPECT().CacheMissSolver(normalPayload).Return(nil, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(normalPayload, mock.Anything).Return(normalPayload, nil).Times(1)
 
 	_, requestErr = cache.RetrieveFromCacheOrCompute(normalPayload)
 	assert.Nil(requestErr)
@@ -879,7 +903,7 @@ func TestReporter(t *testing.T) {
 	cache.SetReporter(reporter)
 
 	processor.EXPECT().ToMapKey(mock.Anything).Return("Keats", nil).Times(1)
-	processor.EXPECT().CacheMissSolver(mock.Anything).Return(nil, nil).Times(1)
+	processor.EXPECT().CacheMissSolver(mock.Anything, mock.Anything).Return((*RequestEntry)(nil), nil).Times(1)
 	_, err := cache.RetrieveFromCacheOrCompute(&RequestEntry{})
 	assert.Nil(err)
 	missCount := <-reporter.missCount
@@ -919,12 +943,12 @@ func BenchmarkInsertDynamic(b *testing.B) {
 func benchInsert(b *testing.B, seed int64) {
 
 	cache := New[Adder, int](Capacity, 0.5, TTL, TTL, &BenchProcessor{})
-	rand.Seed(seed)
+	r := rand.New(rand.NewSource(seed))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 100; j++ {
-			num1 := rand.Int()
-			num2 := rand.Int()
+			num1 := r.Int()
+			num2 := r.Int()
 			adder := Adder{num1, num2}
 			_, _ = cache.RetrieveFromCacheOrCompute(adder)
 		}
@@ -932,11 +956,11 @@ func benchInsert(b *testing.B, seed int64) {
 }
 
 func createRandomArray(seed int64, size int) []Adder {
-	rand.Seed(seed)
+	r := rand.New(rand.NewSource(seed))
 	arr := make([]Adder, size)
 	for i := 0; i < size; i++ {
-		num1 := rand.Int()
-		num2 := rand.Int()
+		num1 := r.Int()
+		num2 := r.Int()
 		arr[i] = Adder{num1, num2}
 	}
 	return arr
@@ -947,12 +971,12 @@ func benchInsertAvalanche(b *testing.B, seed int64) {
 	var size int = 1e3
 	arr := createRandomArray(seed, size)
 	cache := New[Adder, int](Capacity, 0.5, TTL, TTL, &BenchProcessor{})
-	rand.Seed(seed)
+	r := rand.New(rand.NewSource(seed))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < size; j++ {
 			for k := 0; k < 1e3; k++ {
-				_, _ = cache.RetrieveFromCacheOrCompute(arr[j])
+				_, _ = cache.RetrieveFromCacheOrCompute(arr[r.Intn(len(arr))])
 			}
 		}
 	}
@@ -965,4 +989,164 @@ func BenchmarkAvalancheStatic(b *testing.B) {
 
 func BenchmarkAvalancheDynamic(b *testing.B) {
 	benchInsertAvalanche(b, time.Now().Unix())
+}
+
+// Test for metrics
+type SimpleProcessor struct{}
+
+func (p *SimpleProcessor) ToMapKey(key string) (string, error) {
+	return key, nil
+}
+
+func (p *SimpleProcessor) CacheMissSolver(key string, _ ...interface{}) (string, *models.RequestError) {
+	return "value_for_" + key, nil
+}
+
+func TestCacheMetrics(t *testing.T) {
+	assert := assert.New(t)
+	processor := &SimpleProcessor{}
+	cache := New[string, string](
+		10,
+		0.2,
+		time.Minute,
+		time.Minute,
+		processor,
+		WithName[string, string]("test_cache"),
+	)
+
+	metrics := cache.Metrics()
+
+	// 1. Initial State
+	assert.Equal("test_cache", metrics.Name())
+	assert.Equal(int64(0), metrics.Hits())
+	assert.Equal(int64(0), metrics.Misses())
+	assert.Equal(0, metrics.NumEntries())
+	assert.Equal(int64(0), metrics.MemoryUsage())
+	assert.Equal(float64(0), metrics.HitRatio())
+
+	// 2. Misses and Hits
+	// First access: miss
+	val, err := cache.RetrieveFromCacheOrCompute("key1")
+	assert.Nil(err)
+	assert.Equal("value_for_key1", val)
+	assert.Equal(int64(0), metrics.Hits())
+	assert.Equal(int64(1), metrics.Misses())
+	assert.Equal(1, metrics.NumEntries())
+	assert.True(metrics.MemoryUsage() > 0, "Memory usage should be greater than 0 after a miss")
+	initialMemory := metrics.MemoryUsage()
+
+	// Second access: hit
+	val, err = cache.RetrieveFromCacheOrCompute("key1")
+	assert.Nil(err)
+	assert.Equal("value_for_key1", val)
+	assert.Equal(int64(1), metrics.Hits())
+	assert.Equal(int64(1), metrics.Misses())
+	assert.Equal(1, metrics.NumEntries())
+
+	// 3. Ratios and Totals
+	assert.Equal(int64(2), metrics.TotalRequests())
+	assert.InDelta(0.5, metrics.HitRatio(), 0.001)
+	assert.InDelta(0.5, metrics.MissRatio(), 0.001)
+
+	// 4. Eviction
+	cache.capacity = 1 // Force eviction on next insert
+	val, err = cache.RetrieveFromCacheOrCompute("key2")
+	assert.Nil(err)
+	assert.Equal("value_for_key2", val)
+	assert.Equal(int64(2), metrics.Misses(), "A new key should be a miss")
+	assert.Equal(1, metrics.NumEntries(), "NumEntries should be 1 after eviction")
+	assert.True(metrics.MemoryUsage() < initialMemory*2, "Memory should be roughly for one entry after eviction")
+
+	// 5. Clean
+	cleanErr := cache.Clean()
+	assert.Nil(cleanErr)
+	assert.Equal(int64(0), metrics.Hits())
+	assert.Equal(int64(0), metrics.Misses())
+	assert.Equal(0, metrics.NumEntries())
+	assert.Equal(int64(0), metrics.MemoryUsage())
+
+	// 6. GetState JSON
+	// Add some data back
+	_, _ = cache.RetrieveFromCacheOrCompute("keyA")
+	_, _ = cache.RetrieveFromCacheOrCompute("keyA")
+	stateJSON, jsonErr := cache.GetState()
+	assert.Nil(jsonErr)
+
+	var state CacheState
+	unmarshalErr := json.Unmarshal([]byte(stateJSON), &state)
+	assert.Nil(unmarshalErr)
+
+	assert.Equal("test_cache", state.Name)
+	assert.Equal(int64(1), state.Hits)
+	assert.Equal(int64(1), state.Misses)
+	assert.Equal(int64(2), state.TotalRequests)
+	assert.Equal(1, state.NumEntries)
+	assert.True(state.MemoryUsage > 0)
+	assert.InDelta(0.5, state.HitRatio, 0.001)
+}
+
+func TestCacheMemoryUsageNonNegative(t *testing.T) {
+	assert := assert.New(t)
+	processor := &SimpleProcessor{}
+	cache := New[string, string](
+		1,
+		0.2,
+		time.Minute,
+		time.Minute,
+		processor,
+	)
+
+	_, err := cache.RetrieveFromCacheOrCompute("key1")
+	assert.Nil(err)
+	assert.True(cache.MemoryUsage() > 0)
+
+	_, err = cache.RetrieveFromCacheOrCompute("key2")
+	assert.Nil(err)
+	assert.GreaterOrEqual(cache.MemoryUsage(), int64(0))
+}
+
+func TestCacheMetrics_Concurrency(t *testing.T) {
+	assert := assert.New(t)
+	processor := &SimpleProcessor{}
+	cache := New[string, string](
+		50,
+		0.2,
+		time.Minute,
+		time.Minute,
+		processor,
+		WithName[string, string]("concurrent_test"),
+	)
+
+	numGoroutines := 100
+	numOpsPerG := 50
+	keys := []string{"key1", "key2", "key3", "key4", "key5"}
+	totalOps := numGoroutines * numOpsPerG
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			for j := 0; j < numOpsPerG; j++ {
+				key := keys[r.Intn(len(keys))]
+				_, err := cache.RetrieveFromCacheOrCompute(key)
+				assert.Nil(err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	metrics := cache.Metrics()
+	finalHits := metrics.Hits()
+	finalMisses := metrics.Misses()
+
+	// Verification
+	assert.Equal(int64(totalOps), finalHits+finalMisses, "Total operations should equal hits + misses")
+	assert.Equal(len(keys), metrics.NumEntries(), "Number of entries should be the number of unique keys")
+	assert.Equal(int64(len(keys)), finalMisses, "There should be exactly one miss per unique key")
+	assert.Equal(int64(totalOps-len(keys)), finalHits, "Hits should be total ops minus misses")
+	assert.True(metrics.MemoryUsage() > 0, "Memory usage should be positive")
 }
